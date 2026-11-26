@@ -648,51 +648,6 @@ function checkPort(port) {
     socket.connect(port, "localhost");
   });
 }
-async function killProcessOnPort(port) {
-  return new Promise((resolve) => {
-    try {
-      if (process.platform === "win32") {
-        const result2 = (0, import_child_process.execSync)(
-          `netstat -ano | findstr :${port} | findstr LISTENING`,
-          { encoding: "utf8", timeout: 5e3 }
-        ).trim();
-        const pids = /* @__PURE__ */ new Set();
-        for (const line of result2.split("\n")) {
-          const parts = line.trim().split(/\s+/);
-          const pid = parts[parts.length - 1];
-          if (pid && /^\d+$/.test(pid) && pid !== "0")
-            pids.add(pid);
-        }
-        if (pids.size === 0)
-          return resolve(false);
-        for (const pid of pids) {
-          try {
-            (0, import_child_process.execSync)(`taskkill /PID ${pid} /T /F`, { timeout: 5e3 });
-            console.log(`[killProcessOnPort] \u5DF2\u6740\u6B7B PID ${pid} (port=${port})`);
-          } catch (e) {
-          }
-        }
-        resolve(true);
-        return;
-      }
-      const result = (0, import_child_process.execSync)(`lsof -ti :${port}`, { encoding: "utf8", timeout: 5e3 }).trim();
-      if (!result)
-        return resolve(false);
-      for (const pid of result.split("\n")) {
-        if (!pid.trim())
-          continue;
-        try {
-          (0, import_child_process.execSync)(`kill -9 ${pid.trim()}`, { timeout: 5e3 });
-          console.log(`[killProcessOnPort] \u5DF2\u6740\u6B7B PID ${pid.trim()} (port=${port})`);
-        } catch (e) {
-        }
-      }
-      resolve(true);
-    } catch (e) {
-      resolve(false);
-    }
-  });
-}
 function waitForPort(port, timeoutMs) {
   return new Promise((resolve) => {
     const start = Date.now();
@@ -789,29 +744,10 @@ var OpenCodeAdapter = class {
       this.authHeader = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
     }
     if (this.settings.autoStartProcess) {
-      const inUse = await checkPort(portToUse);
-      if (inUse) {
-        const alreadyHealthy = await this.checkHealth();
-        if (alreadyHealthy) {
-          console.log(`[OpenCode] \u7AEF\u53E3 ${portToUse} \u5DF2\u6709\u53EF\u7528\u7684 opencode \u670D\u52A1\u5668`);
-        } else {
-          console.warn(`[OpenCode] \u7AEF\u53E3 ${portToUse} \u88AB\u5360\u7528\uFF0C\u5C1D\u8BD5\u81EA\u52A8\u6740\u6B7B\u5360\u7528\u8FDB\u7A0B...`);
-          await killProcessOnPort(portToUse);
-          const maxWait = 5e3;
-          const start = Date.now();
-          while (Date.now() - start < maxWait) {
-            const still = await checkPort(portToUse);
-            if (!still)
-              break;
-            await new Promise((r) => setTimeout(r, 500));
-          }
-          const stillInUse = await checkPort(portToUse);
-          if (stillInUse) {
-            throw new Error(`\u7AEF\u53E3 ${portToUse} \u4ECD\u88AB\u5360\u7528\uFF0C\u65E0\u6CD5\u542F\u52A8 opencode \u670D\u52A1\u5668`);
-          }
-        }
-      }
       if (!await this.checkHealth()) {
+        if (await checkPort(portToUse)) {
+          throw new Error(`\u7AEF\u53E3 ${portToUse} \u5DF2\u88AB\u5360\u7528\u4E14\u672A\u901A\u8FC7 OpenCode \u5065\u5EB7\u68C0\u67E5\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u6216\u66F4\u6362\u7AEF\u53E3`);
+        }
         console.log(`[OpenCode] \u5C1D\u8BD5\u81EA\u52A8\u542F\u52A8 HTTP \u670D\u52A1\u5668 (port=${portToUse})...`);
         const started = await this.startProcess(portToUse, cwdToUse);
         if (!started)

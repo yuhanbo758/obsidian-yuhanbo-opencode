@@ -6,7 +6,7 @@
 
 从 [GitHub Releases](https://github.com/yuhanbo758/obsidian-yuhanbo-opencode/releases) 下载同一版本的 `main.js`、`manifest.json` 和 `styles.css`，放入笔记库的 `.obsidian/plugins/yuhanbo-opencode/`。重载 Obsidian 后在「设置 → 第三方插件」启用 **yuhanbo-opencode**。点击左侧「笔记助理」图标打开面板。
 
-默认连接 `http://localhost:8091`。自动启动调用用户已安装的 OpenCode。模型和提供商使用 OpenCode 的配置，提供商可能另行收费。
+默认连接 `http://localhost:8091`。端口已占用且无法连接时，请核对服务或换用空闲端口。自动启动调用用户已安装的 OpenCode。模型和提供商使用 OpenCode 的配置，提供商可能另行收费。
 
 从旧版手动安装迁移时，备份原安装目录，停用旧版，再安装新 ID。旧版设置可按需从原目录的 data.json 在本机复制，已有 Obsidian 快捷键需要按新插件 ID 重新绑定。
 

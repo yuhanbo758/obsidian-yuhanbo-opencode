@@ -16,7 +16,7 @@ Click the notebook assistant ribbon icon. Type `@` alone, choose a note, and ent
 
 ## Privacy
 
-The plugin connects to a local OpenCode service using HTTP and SSE. The selected model provider can receive the prompts, attachments, and note content you choose to use. The configured SMTP service receives task notices only when email is enabled. The plugin uses Obsidian’s Vault API for direct file reads. OpenCode handles explicitly requested external paths and Skills under its own permissions. The plugin can start the installed OpenCode program and query its model list. Activation is verified offline, and there is no telemetry.
+The plugin connects to a local OpenCode service using HTTP and SSE. The selected model provider can receive the prompts, attachments, and note content you choose to use. The configured SMTP service receives task notices only when email is enabled. The plugin uses Obsidian’s Vault API for direct file reads. OpenCode handles explicitly requested external paths and Skills under its own permissions. The plugin uses the locally installed OpenCode CLI. It calls `opencode models` to load the model list from your own configuration and `opencode serve` when automatic startup is enabled. Use the copy button to write a conversation message to the clipboard. Activation is verified offline, and there is no telemetry.
 
 在 Obsidian 桌面端使用 OpenCode 查找、引用和改写笔记，也可以把重复工作保存成定时任务。插件需要用户自行安装并配置 [OpenCode](https://opencode.ai/)。
 
@@ -43,7 +43,7 @@ The plugin connects to a local OpenCode service using HTTP and SSE. The selected
 ## 隐私、网络与文件访问
 
 - 插件通过本机 HTTP 和 SSE 与 OpenCode 通信。聊天提示词、引用和任务内容会交给 OpenCode，OpenCode 可能将这些数据发给配置的模型提供商。
-- 插件通过 Obsidian 文件接口读取库内模板、笔记与附件。聊天中明确指定的库外路径及外部 Skills 交给 OpenCode，根据其权限设置处理。自动启动和获取模型列表会调用本机已安装的 OpenCode。
+- 插件通过 Obsidian 文件接口读取库内模板、笔记与附件。聊天中明确指定的库外路径及外部 Skills 交给 OpenCode，根据其权限设置处理。模型列表由本机的 OpenCode CLI 按用户配置动态返回。自动启动启用时，插件调用本机的 OpenCode CLI 启动服务。点击复制按钮时，插件将所选消息写入剪贴板。
 - 启用邮件后，插件向配置的 SMTP 服务发送任务通知或测试邮件。插件将 SMTP 配置和激活码保存在 `data.json` 中，请按凭据文件保护。
 - 插件没有客户端遥测，也不会自行安装依赖或更新。社区目录收录后由 Obsidian 提供 GitHub Release 更新。
 

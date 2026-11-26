@@ -87,326 +87,6 @@ var require_skills_paths = __commonJS({
   }
 });
 
-// src/weighted-search.js
-var require_weighted_search = __commonJS({
-  "src/weighted-search.js"(exports, module2) {
-    var CJK_RE = /[\u4e00-\u9fff]/;
-    function splitKeywords2(input) {
-      const text = String(input != null ? input : "").trim();
-      if (!text)
-        return [];
-      return text.split(/[ \t\r\n\u3000]+/).map((s) => s.trim()).filter(Boolean);
-    }
-    function isCjkTerm(term) {
-      return CJK_RE.test(term);
-    }
-    function countOccurrences(haystackLower, needleLower) {
-      if (!needleLower)
-        return 0;
-      let count = 0;
-      let idx = 0;
-      while (true) {
-        const found = haystackLower.indexOf(needleLower, idx);
-        if (found < 0)
-          break;
-        count++;
-        idx = found + needleLower.length;
-      }
-      return count;
-    }
-    function extractAlphaNumTokens(text) {
-      const out = [];
-      const re = /[a-zA-Z0-9_]+/g;
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const t = m[0];
-        if (!t)
-          continue;
-        out.push(t.toLowerCase());
-      }
-      return out;
-    }
-    function extractCjkSequences(text) {
-      const out = [];
-      const re = /[\u4e00-\u9fff]+/g;
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const t = m[0];
-        if (!t)
-          continue;
-        out.push(t);
-      }
-      return out;
-    }
-    function countDocLength(text) {
-      if (!text)
-        return 0;
-      const tokens = text.match(/[a-zA-Z0-9_]+|[\u4e00-\u9fff]/g);
-      return tokens ? tokens.length : 0;
-    }
-    function addPosting(map, term, docId, inc) {
-      let posting = map.get(term);
-      if (!posting) {
-        posting = /* @__PURE__ */ new Map();
-        map.set(term, posting);
-      }
-      posting.set(docId, (posting.get(docId) || 0) + inc);
-    }
-    function intersectDocIdSets(postings) {
-      if (postings.length === 0)
-        return null;
-      const first = postings[0];
-      if (!first)
-        return null;
-      let out = new Set(first.keys());
-      for (let i = 1; i < postings.length; i++) {
-        const p = postings[i];
-        if (!p)
-          return null;
-        const next = /* @__PURE__ */ new Set();
-        for (const id of out) {
-          if (p.has(id))
-            next.add(id);
-        }
-        out = next;
-        if (out.size === 0)
-          return out;
-      }
-      return out;
-    }
-    function toRanges(text, keyword, caseInsensitive) {
-      const ranges = [];
-      if (!keyword)
-        return ranges;
-      const haystack = caseInsensitive ? text.toLowerCase() : text;
-      const needle = caseInsensitive ? keyword.toLowerCase() : keyword;
-      let idx = 0;
-      while (true) {
-        const found = haystack.indexOf(needle, idx);
-        if (found < 0)
-          break;
-        ranges.push({ start: found, end: found + needle.length });
-        idx = found + needle.length;
-      }
-      return ranges;
-    }
-    function buildHighlights(title, snippet, keywords) {
-      const titleHighlights = {};
-      const snippetHighlights = {};
-      for (const kw of keywords) {
-        const isAscii = !isCjkTerm(kw);
-        const tRanges = toRanges(title || "", kw, isAscii);
-        const sRanges = toRanges(snippet || "", kw, isAscii);
-        if (tRanges.length > 0)
-          titleHighlights[kw] = tRanges;
-        if (sRanges.length > 0)
-          snippetHighlights[kw] = sRanges;
-      }
-      return { title: titleHighlights, snippet: snippetHighlights };
-    }
-    function buildSnippet(content, keywords, options) {
-      var _a, _b, _c;
-      const maxLen = (_a = options == null ? void 0 : options.maxSnippetLength) != null ? _a : 160;
-      const ctxBefore = (_b = options == null ? void 0 : options.contextBefore) != null ? _b : 40;
-      const ctxAfter = (_c = options == null ? void 0 : options.contextAfter) != null ? _c : 80;
-      const raw = String(content || "");
-      if (!raw)
-        return "";
-      const compact = raw.replace(/\s+/g, " ");
-      const compactLower = compact.toLowerCase();
-      let bestIdx = -1;
-      let bestLen = 0;
-      for (const kw of keywords) {
-        if (!kw)
-          continue;
-        const needle = isCjkTerm(kw) ? kw : kw.toLowerCase();
-        const found = compactLower.indexOf(needle);
-        if (found >= 0 && (bestIdx < 0 || found < bestIdx)) {
-          bestIdx = found;
-          bestLen = needle.length;
-        }
-      }
-      if (bestIdx < 0) {
-        return compact.length <= maxLen ? compact : compact.slice(0, maxLen) + "...";
-      }
-      const start = Math.max(0, bestIdx - ctxBefore);
-      const end = Math.min(compact.length, bestIdx + bestLen + ctxAfter);
-      let snippet = compact.slice(start, end);
-      if (start > 0)
-        snippet = "..." + snippet;
-      if (end < compact.length)
-        snippet = snippet + "...";
-      if (snippet.length > maxLen)
-        snippet = snippet.slice(0, maxLen) + "...";
-      return snippet;
-    }
-    function getOrBuildContentLower(doc) {
-      if (!doc)
-        return "";
-      if (typeof doc.contentLower === "string")
-        return doc.contentLower;
-      const content = typeof doc.content === "string" ? doc.content : "";
-      const lower = content ? content.toLowerCase() : "";
-      doc.contentLower = lower;
-      return lower;
-    }
-    var WeightedSearchIndex2 = class {
-      constructor(options) {
-        this.options = options || {};
-        this.docs = /* @__PURE__ */ new Map();
-        this.words = /* @__PURE__ */ new Map();
-        this.gram2 = /* @__PURE__ */ new Map();
-        this.gram3 = /* @__PURE__ */ new Map();
-        this.N = 0;
-        this.avgDocLen = 0;
-      }
-      build(docs) {
-        this.docs.clear();
-        this.words.clear();
-        this.gram2.clear();
-        this.gram3.clear();
-        let totalLen = 0;
-        for (const doc of docs || []) {
-          const id = String((doc == null ? void 0 : doc.id) || "");
-          if (!id)
-            continue;
-          const title = String((doc == null ? void 0 : doc.title) || "");
-          const path3 = (doc == null ? void 0 : doc.path) ? String(doc.path) : id;
-          const content = String((doc == null ? void 0 : doc.content) || "");
-          const titleLower = title.toLowerCase();
-          const docLen = countDocLength(title + "\n" + content);
-          totalLen += docLen;
-          this.docs.set(id, {
-            id,
-            path: path3,
-            title,
-            titleLower,
-            content,
-            docLen
-          });
-          const tokens = extractAlphaNumTokens(title + "\n" + content);
-          for (const t of tokens)
-            addPosting(this.words, t, id, 1);
-          const sequences = extractCjkSequences(title + "\n" + content);
-          for (const seq of sequences) {
-            if (seq.length >= 2) {
-              for (let i = 0; i <= seq.length - 2; i++) {
-                addPosting(this.gram2, seq.slice(i, i + 2), id, 1);
-              }
-            }
-            if (seq.length >= 3) {
-              for (let i = 0; i <= seq.length - 3; i++) {
-                addPosting(this.gram3, seq.slice(i, i + 3), id, 1);
-              }
-            }
-          }
-        }
-        this.N = this.docs.size;
-        this.avgDocLen = this.N > 0 ? totalLen / this.N : 0;
-        return this;
-      }
-      search(query, options) {
-        var _a, _b;
-        const keywords = splitKeywords2(query);
-        const topN = typeof (options == null ? void 0 : options.topN) === "number" && options.topN > 0 ? Math.floor(options.topN) : 20;
-        const weights = (options == null ? void 0 : options.weights) && typeof options.weights === "object" ? options.weights : {};
-        const k1 = typeof (options == null ? void 0 : options.k1) === "number" ? options.k1 : typeof ((_a = this.options) == null ? void 0 : _a.k1) === "number" ? this.options.k1 : 1.2;
-        const b = typeof (options == null ? void 0 : options.b) === "number" ? options.b : typeof ((_b = this.options) == null ? void 0 : _b.b) === "number" ? this.options.b : 0.75;
-        const scoreByDoc = /* @__PURE__ */ new Map();
-        const matchByDoc = /* @__PURE__ */ new Map();
-        for (const rawKw of keywords) {
-          const kw = String(rawKw || "").trim();
-          if (!kw)
-            continue;
-          const weight = typeof weights[kw] === "number" ? weights[kw] : 1;
-          if (!Number.isFinite(weight) || weight === 0)
-            continue;
-          let tfByDoc = /* @__PURE__ */ new Map();
-          if (isCjkTerm(kw)) {
-            if (kw.length < 2)
-              continue;
-            const gramSize = kw.length >= 3 ? 3 : 2;
-            const grams = [];
-            for (let i = 0; i <= kw.length - gramSize; i++) {
-              grams.push(kw.slice(i, i + gramSize));
-            }
-            const maps = grams.map((g) => gramSize === 3 ? this.gram3.get(g) : this.gram2.get(g));
-            const candidates = intersectDocIdSets(maps);
-            if (!candidates || candidates.size === 0)
-              continue;
-            for (const docId of candidates) {
-              const doc = this.docs.get(docId);
-              if (!doc)
-                continue;
-              const tf = countOccurrences(doc.titleLower + "\n" + getOrBuildContentLower(doc), kw);
-              if (tf > 0)
-                tfByDoc.set(docId, tf);
-            }
-          } else {
-            const token = kw.toLowerCase();
-            const posting = this.words.get(token);
-            if (!posting)
-              continue;
-            for (const [docId, tf] of posting.entries()) {
-              if (tf > 0)
-                tfByDoc.set(docId, tf);
-            }
-          }
-          const df = tfByDoc.size;
-          if (df === 0)
-            continue;
-          const idf = Math.log(1 + (this.N - df + 0.5) / (df + 0.5));
-          for (const [docId, tf] of tfByDoc.entries()) {
-            const doc = this.docs.get(docId);
-            if (!doc)
-              continue;
-            const dl = doc.docLen || 0;
-            const denom = tf + k1 * (1 - b + b * dl / (this.avgDocLen || 1));
-            const bm25 = denom > 0 ? tf * (k1 + 1) / denom : 0;
-            const add = weight * idf * bm25;
-            scoreByDoc.set(docId, (scoreByDoc.get(docId) || 0) + add);
-            let m = matchByDoc.get(docId);
-            if (!m) {
-              m = {};
-              matchByDoc.set(docId, m);
-            }
-            m[kw] = { tf, df, idf, weight, add };
-          }
-        }
-        const results = [];
-        const highlightPositions = {};
-        for (const [docId, score] of scoreByDoc.entries()) {
-          const doc = this.docs.get(docId);
-          if (!doc)
-            continue;
-          const snippet = buildSnippet(doc.content, keywords, options);
-          const highlights = buildHighlights(doc.title, snippet, keywords);
-          highlightPositions[docId] = highlights;
-          results.push({
-            docId,
-            path: doc.path,
-            title: doc.title,
-            snippet,
-            score,
-            matches: matchByDoc.get(docId) || {}
-          });
-        }
-        results.sort((a, b2) => (b2.score || 0) - (a.score || 0));
-        return {
-          keywords,
-          results: results.slice(0, topN),
-          highlightPositions
-        };
-      }
-    };
-    module2.exports = {
-      splitKeywords: splitKeywords2,
-      WeightedSearchIndex: WeightedSearchIndex2,
-      buildHighlights
-    };
-  }
-});
-
 // main.ts
 var main_exports = {};
 __export(main_exports, {
@@ -2536,7 +2216,319 @@ var net2 = __toESM(require("net"));
 var tls = __toESM(require("tls"));
 var path2 = __toESM(require("path"));
 var SkillsPaths = __toESM(require_skills_paths());
-var WeightedSearch = __toESM(require_weighted_search());
+
+// src/weighted-search.ts
+var CJK_RE = /[\u4e00-\u9fff]/;
+function splitKeywords(input) {
+  const text = String(input != null ? input : "").trim();
+  if (!text)
+    return [];
+  return text.split(/[ \t\r\n\u3000]+/).map((s) => s.trim()).filter(Boolean);
+}
+function isCjkTerm(term) {
+  return CJK_RE.test(term);
+}
+function countOccurrences(haystackLower, needleLower) {
+  if (!needleLower)
+    return 0;
+  let count = 0;
+  let idx = 0;
+  while (true) {
+    const found = haystackLower.indexOf(needleLower, idx);
+    if (found < 0)
+      break;
+    count++;
+    idx = found + needleLower.length;
+  }
+  return count;
+}
+function extractAlphaNumTokens(text) {
+  const out = [];
+  const re = /[a-zA-Z0-9_]+/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const t = m[0];
+    if (!t)
+      continue;
+    out.push(t.toLowerCase());
+  }
+  return out;
+}
+function extractCjkSequences(text) {
+  const out = [];
+  const re = /[\u4e00-\u9fff]+/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const t = m[0];
+    if (!t)
+      continue;
+    out.push(t);
+  }
+  return out;
+}
+function countDocLength(text) {
+  if (!text)
+    return 0;
+  const tokens = text.match(/[a-zA-Z0-9_]+|[\u4e00-\u9fff]/g);
+  return tokens ? tokens.length : 0;
+}
+function addPosting(map, term, docId, inc) {
+  let posting = map.get(term);
+  if (!posting) {
+    posting = /* @__PURE__ */ new Map();
+    map.set(term, posting);
+  }
+  posting.set(docId, (posting.get(docId) || 0) + inc);
+}
+function intersectDocIdSets(postings) {
+  if (postings.length === 0)
+    return null;
+  const first = postings[0];
+  if (!first)
+    return null;
+  let out = new Set(first.keys());
+  for (let i = 1; i < postings.length; i++) {
+    const p = postings[i];
+    if (!p)
+      return null;
+    const next = /* @__PURE__ */ new Set();
+    for (const id of out) {
+      if (p.has(id))
+        next.add(id);
+    }
+    out = next;
+    if (out.size === 0)
+      return out;
+  }
+  return out;
+}
+function toRanges(text, keyword, caseInsensitive) {
+  const ranges = [];
+  if (!keyword)
+    return ranges;
+  const haystack = caseInsensitive ? text.toLowerCase() : text;
+  const needle = caseInsensitive ? keyword.toLowerCase() : keyword;
+  let idx = 0;
+  while (true) {
+    const found = haystack.indexOf(needle, idx);
+    if (found < 0)
+      break;
+    ranges.push({ start: found, end: found + needle.length });
+    idx = found + needle.length;
+  }
+  return ranges;
+}
+function buildHighlights(title, snippet, keywords) {
+  const titleHighlights = /* @__PURE__ */ Object.create(null);
+  const snippetHighlights = /* @__PURE__ */ Object.create(null);
+  for (const kw of keywords) {
+    const isAscii = !isCjkTerm(kw);
+    const tRanges = toRanges(title || "", kw, isAscii);
+    const sRanges = toRanges(snippet || "", kw, isAscii);
+    if (tRanges.length > 0)
+      titleHighlights[kw] = tRanges;
+    if (sRanges.length > 0)
+      snippetHighlights[kw] = sRanges;
+  }
+  return { title: titleHighlights, snippet: snippetHighlights };
+}
+function buildSnippet(content, keywords, options) {
+  var _a, _b, _c;
+  const maxLen = (_a = options == null ? void 0 : options.maxSnippetLength) != null ? _a : 160;
+  const ctxBefore = (_b = options == null ? void 0 : options.contextBefore) != null ? _b : 40;
+  const ctxAfter = (_c = options == null ? void 0 : options.contextAfter) != null ? _c : 80;
+  const raw = String(content || "");
+  if (!raw)
+    return "";
+  const compact = raw.replace(/\s+/g, " ");
+  const compactLower = compact.toLowerCase();
+  let bestIdx = -1;
+  let bestLen = 0;
+  for (const kw of keywords) {
+    if (!kw)
+      continue;
+    const needle = isCjkTerm(kw) ? kw : kw.toLowerCase();
+    const found = compactLower.indexOf(needle);
+    if (found >= 0 && (bestIdx < 0 || found < bestIdx)) {
+      bestIdx = found;
+      bestLen = needle.length;
+    }
+  }
+  if (bestIdx < 0) {
+    return compact.length <= maxLen ? compact : compact.slice(0, maxLen) + "...";
+  }
+  const start = Math.max(0, bestIdx - ctxBefore);
+  const end = Math.min(compact.length, bestIdx + bestLen + ctxAfter);
+  let snippet = compact.slice(start, end);
+  if (start > 0)
+    snippet = "..." + snippet;
+  if (end < compact.length)
+    snippet = snippet + "...";
+  if (snippet.length > maxLen)
+    snippet = snippet.slice(0, maxLen) + "...";
+  return snippet;
+}
+function getOrBuildContentLower(doc) {
+  if (!doc)
+    return "";
+  if (typeof doc.contentLower === "string")
+    return doc.contentLower;
+  const content = typeof doc.content === "string" ? doc.content : "";
+  const lower = content ? content.toLowerCase() : "";
+  doc.contentLower = lower;
+  return lower;
+}
+var WeightedSearchIndex = class {
+  constructor(options = {}) {
+    this.options = options;
+    this.docs = /* @__PURE__ */ new Map();
+    this.words = /* @__PURE__ */ new Map();
+    this.gram2 = /* @__PURE__ */ new Map();
+    this.gram3 = /* @__PURE__ */ new Map();
+    this.N = 0;
+    this.avgDocLen = 0;
+  }
+  build(docs) {
+    this.docs.clear();
+    this.words.clear();
+    this.gram2.clear();
+    this.gram3.clear();
+    let totalLen = 0;
+    for (const doc of docs || []) {
+      const id = String((doc == null ? void 0 : doc.id) || "");
+      if (!id)
+        continue;
+      const title = String((doc == null ? void 0 : doc.title) || "");
+      const path3 = (doc == null ? void 0 : doc.path) ? String(doc.path) : id;
+      const content = String((doc == null ? void 0 : doc.content) || "");
+      const titleLower = title.toLowerCase();
+      const docLen = countDocLength(title + "\n" + content);
+      totalLen += docLen;
+      this.docs.set(id, {
+        id,
+        path: path3,
+        title,
+        titleLower,
+        content,
+        docLen
+      });
+      const tokens = extractAlphaNumTokens(title + "\n" + content);
+      for (const t of tokens)
+        addPosting(this.words, t, id, 1);
+      const sequences = extractCjkSequences(title + "\n" + content);
+      for (const seq of sequences) {
+        if (seq.length >= 2) {
+          for (let i = 0; i <= seq.length - 2; i++) {
+            addPosting(this.gram2, seq.slice(i, i + 2), id, 1);
+          }
+        }
+        if (seq.length >= 3) {
+          for (let i = 0; i <= seq.length - 3; i++) {
+            addPosting(this.gram3, seq.slice(i, i + 3), id, 1);
+          }
+        }
+      }
+    }
+    this.N = this.docs.size;
+    this.avgDocLen = this.N > 0 ? totalLen / this.N : 0;
+    return this;
+  }
+  search(query, options) {
+    var _a, _b;
+    const keywords = splitKeywords(query);
+    const topN = typeof (options == null ? void 0 : options.topN) === "number" && options.topN > 0 ? Math.floor(options.topN) : 20;
+    const weights = (options == null ? void 0 : options.weights) && typeof options.weights === "object" ? options.weights : {};
+    const k1 = typeof (options == null ? void 0 : options.k1) === "number" ? options.k1 : typeof ((_a = this.options) == null ? void 0 : _a.k1) === "number" ? this.options.k1 : 1.2;
+    const b = typeof (options == null ? void 0 : options.b) === "number" ? options.b : typeof ((_b = this.options) == null ? void 0 : _b.b) === "number" ? this.options.b : 0.75;
+    const scoreByDoc = /* @__PURE__ */ new Map();
+    const matchByDoc = /* @__PURE__ */ new Map();
+    for (const rawKw of keywords) {
+      const kw = String(rawKw || "").trim();
+      if (!kw)
+        continue;
+      const weight = typeof weights[kw] === "number" ? weights[kw] : 1;
+      if (!Number.isFinite(weight) || weight === 0)
+        continue;
+      const tfByDoc = /* @__PURE__ */ new Map();
+      if (isCjkTerm(kw)) {
+        if (kw.length < 2)
+          continue;
+        const gramSize = kw.length >= 3 ? 3 : 2;
+        const grams = [];
+        for (let i = 0; i <= kw.length - gramSize; i++) {
+          grams.push(kw.slice(i, i + gramSize));
+        }
+        const maps = grams.map((g) => gramSize === 3 ? this.gram3.get(g) : this.gram2.get(g));
+        const candidates = intersectDocIdSets(maps);
+        if (!candidates || candidates.size === 0)
+          continue;
+        for (const docId of candidates) {
+          const doc = this.docs.get(docId);
+          if (!doc)
+            continue;
+          const tf = countOccurrences(doc.titleLower + "\n" + getOrBuildContentLower(doc), kw);
+          if (tf > 0)
+            tfByDoc.set(docId, tf);
+        }
+      } else {
+        const token = kw.toLowerCase();
+        const posting = this.words.get(token);
+        if (!posting)
+          continue;
+        for (const [docId, tf] of posting.entries()) {
+          if (tf > 0)
+            tfByDoc.set(docId, tf);
+        }
+      }
+      const df = tfByDoc.size;
+      if (df === 0)
+        continue;
+      const idf = Math.log(1 + (this.N - df + 0.5) / (df + 0.5));
+      for (const [docId, tf] of tfByDoc.entries()) {
+        const doc = this.docs.get(docId);
+        if (!doc)
+          continue;
+        const dl = doc.docLen || 0;
+        const denom = tf + k1 * (1 - b + b * dl / (this.avgDocLen || 1));
+        const bm25 = denom > 0 ? tf * (k1 + 1) / denom : 0;
+        const add = weight * idf * bm25;
+        scoreByDoc.set(docId, (scoreByDoc.get(docId) || 0) + add);
+        let m = matchByDoc.get(docId);
+        if (!m) {
+          m = /* @__PURE__ */ Object.create(null);
+          matchByDoc.set(docId, m);
+        }
+        m[kw] = { tf, df, idf, weight, add };
+      }
+    }
+    const results = [];
+    const highlightPositions = /* @__PURE__ */ Object.create(null);
+    for (const [docId, score] of scoreByDoc.entries()) {
+      const doc = this.docs.get(docId);
+      if (!doc)
+        continue;
+      const snippet = buildSnippet(doc.content, keywords, options);
+      const highlights = buildHighlights(doc.title, snippet, keywords);
+      highlightPositions[docId] = highlights;
+      results.push({
+        docId,
+        path: doc.path,
+        title: doc.title,
+        snippet,
+        score,
+        matches: matchByDoc.get(docId) || {}
+      });
+    }
+    results.sort((a, b2) => (b2.score || 0) - (a.score || 0));
+    return {
+      keywords,
+      results: results.slice(0, topN),
+      highlightPositions
+    };
+  }
+};
+
+// main.ts
 var DEFAULT_SETTINGS = {
   cliBackend: "opencode",
   autoStartProcess: true,
@@ -2625,23 +2617,19 @@ function parseModelsOutput(stdout) {
 }
 function readOpenCodeModels(installDir, timeoutMs = 15e3) {
   return new Promise((resolve, reject) => {
-    var _a, _b;
+    var _a;
     try {
       const proc = spawnOpenCode(installDir, { type: "models" }, {
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "ignore"]
       });
       let stdout = "";
-      let stderr = "";
-      (_a = proc.stdout) == null ? void 0 : _a.on("data", (data) => {
-        stdout += data.toString();
-      });
-      (_b = proc.stderr) == null ? void 0 : _b.on("data", (data) => {
-        stderr += data.toString();
+      (_a = proc.stdout) == null ? void 0 : _a.setEncoding("utf8").on("data", (data) => {
+        stdout += data;
       });
       const timer = setTimeout(() => {
         try {
           proc.kill();
-        } catch (_) {
+        } catch (e) {
         }
         reject(new Error(`\u547D\u4EE4\u8D85\u65F6 (${timeoutMs}ms)`));
       }, timeoutMs);
@@ -2650,15 +2638,15 @@ function readOpenCodeModels(installDir, timeoutMs = 15e3) {
         if (code === 0) {
           resolve(stdout.trim());
         } else {
-          reject(new Error(`\u547D\u4EE4\u9000\u51FA\u7801 ${code}: ${stderr.trim()}`));
+          reject(new Error(`\u547D\u4EE4\u9000\u51FA\u7801 ${code}`));
         }
       });
       proc.on("error", (err) => {
         clearTimeout(timer);
         reject(err);
       });
-    } catch (e) {
-      reject(e);
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error("\u65E0\u6CD5\u542F\u52A8 OpenCode \u6A21\u578B\u5217\u8868\u547D\u4EE4"));
     }
   });
 }
@@ -3657,9 +3645,10 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
     copyBtn.dataset.content = text;
     copyBtn.addEventListener("click", () => {
       const contentToCopy = copyBtn.dataset.content || text;
-      navigator.clipboard.writeText(contentToCopy).then(() => {
-        new import_obsidian2.Notice("\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F");
-      });
+      void copyBtn.win.navigator.clipboard.writeText(contentToCopy).then(
+        () => new import_obsidian2.Notice("\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F"),
+        () => new import_obsidian2.Notice("\u65E0\u6CD5\u5199\u5165\u526A\u8D34\u677F")
+      );
     });
     const contentEl = msgDiv.createDiv({ cls: `iflow-message-content${role === "ai" ? " markdown-preview-view markdown-rendered" : ""}` });
     if (role === "ai") {
@@ -3688,18 +3677,10 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
         return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      this.plugin.app.workspace.openLinkText(href, "", true);
+      void this.plugin.app.workspace.openLinkText(href, "", true).catch(() => {
+        new import_obsidian2.Notice("\u65E0\u6CD5\u6253\u5F00\u7B14\u8BB0\u94FE\u63A5");
+      });
     }, true);
-  }
-  getWeightedSearchPlugin() {
-    var _a;
-    const plugins = (_a = this.plugin.app) == null ? void 0 : _a.plugins;
-    if (!plugins || typeof plugins.getPlugin !== "function")
-      return null;
-    const searchPlugin = plugins.getPlugin("obsidian-yuhanbo-search");
-    if (!searchPlugin || typeof searchPlugin.search !== "function")
-      return null;
-    return searchPlugin;
   }
   isWebSearchQuery(text) {
     const t = text.trim().toLowerCase();
@@ -4348,8 +4329,6 @@ ${fullPrompt}`;
     this.stopRequested = false;
     this.plugin.beginProcessing("\u804A\u5929");
     try {
-      const backendName = this.plugin.getBackendDisplayName();
-      console.log(`[${backendName}] Sending message: ${text}`);
       const historyContext = cwdSwitched ? this.plugin.formatChatHistoryForPrompt() : "";
       const promptWithHistory = historyContext ? `${historyContext}
 
@@ -4362,7 +4341,6 @@ ${fullPrompt}` : fullPrompt;
           finalResponse = sessionRenderer.showStopped();
           break;
         }
-        console.log(`[${backendName}] Received:`, event.message);
         if (event.type === "final_answer") {
           finalResponse = event.state.finalAnswer;
           sessionRenderer.setFinalAnswer(finalResponse);
@@ -4375,7 +4353,6 @@ ${fullPrompt}` : fullPrompt;
             this.clearPendingActionRequest();
           }
         } else if (event.type === "task_finish") {
-          console.log(`[${backendName}] Task finished`);
           sessionRenderer.markAllToolsDone();
           let renderedText = event.state.finalAnswer.trim();
           if (!renderedText) {
@@ -4405,10 +4382,8 @@ ${fullPrompt}` : fullPrompt;
           }
           break;
         } else if (event.type === "error") {
-          console.error(`[${backendName}] Error:`, event.message);
           sessionRenderer.showError(event.state.errorMessage || event.message.message || "\u8FD4\u56DE\u9519\u8BEF");
         } else if (event.type === "tool_call" && event.toolCall) {
-          console.log(`[${backendName}] Tool Call:`, event.message);
           sessionRenderer.upsertToolCall(event.toolCall);
         }
       }
@@ -4443,7 +4418,7 @@ var VaultWeightedSearchService = class {
       return;
     if (this.rebuildTimer)
       return;
-    this.rebuildTimer = setTimeout(() => {
+    this.rebuildTimer = window.setTimeout(() => {
       this.rebuildTimer = null;
       this.rebuild().catch(() => {
       });
@@ -4451,7 +4426,7 @@ var VaultWeightedSearchService = class {
   }
   dispose() {
     if (this.rebuildTimer) {
-      clearTimeout(this.rebuildTimer);
+      window.clearTimeout(this.rebuildTimer);
       this.rebuildTimer = null;
     }
     this.index = null;
@@ -4499,7 +4474,7 @@ var VaultWeightedSearchService = class {
       for (let i = 0; i < concurrency; i++)
         workers.push(worker());
       await Promise.all(workers);
-      const next = new WeightedSearch.WeightedSearchIndex({ k1: settings.searchBm25K1, b: settings.searchBm25B });
+      const next = new WeightedSearchIndex({ k1: settings.searchBm25K1, b: settings.searchBm25B });
       next.build(docs);
       this.index = next;
       this.dirty = false;
@@ -4518,7 +4493,7 @@ var VaultWeightedSearchService = class {
     const settings = this.getSettings();
     const topN = typeof (override == null ? void 0 : override.topN) === "number" ? override.topN : settings.searchTopN;
     const weights = settings.searchKeywordWeights || {};
-    const res = this.index ? this.index.search(query, { topN, weights, k1: settings.searchBm25K1, b: settings.searchBm25B }) : { keywords: WeightedSearch.splitKeywords(query), results: [], highlightPositions: {} };
+    const res = this.index ? this.index.search(query, { topN, weights, k1: settings.searchBm25K1, b: settings.searchBm25B }) : { keywords: splitKeywords(query), results: [], highlightPositions: {} };
     return {
       keywords: res.keywords,
       results: res.results,
@@ -4557,7 +4532,7 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     if (this.processingCount === 1) {
       let dots = 0;
       this.renderProcessingNotice(dots);
-      this.processingNoticeTimer = setInterval(() => {
+      this.processingNoticeTimer = window.setInterval(() => {
         dots = (dots + 1) % 4;
         this.renderProcessingNotice(dots);
       }, 500);
@@ -4614,7 +4589,7 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     var _a, _b;
     if (this.processingCount === 0) {
       if (this.processingNoticeTimer) {
-        clearInterval(this.processingNoticeTimer);
+        window.clearInterval(this.processingNoticeTimer);
         this.processingNoticeTimer = null;
       }
       if (this.processingNotice) {
@@ -4914,7 +4889,7 @@ ${prompt}`;
   }
   stopAllScheduledTasks() {
     for (const timer of this.scheduledTaskTimers.values()) {
-      clearTimeout(timer);
+      window.clearTimeout(timer);
     }
     this.scheduledTaskTimers.clear();
   }
@@ -4929,7 +4904,7 @@ ${prompt}`;
       const fullDelay = Math.max(0, nextRun.getTime() - Date.now());
       const maxTimerDelay = 2147483647;
       const delay = Math.min(fullDelay, maxTimerDelay);
-      const timer = setTimeout(async () => {
+      const timer = window.setTimeout(async () => {
         var _a;
         if (!this.hasAutomationLicense())
           return;
@@ -4959,7 +4934,7 @@ ${prompt}`;
   stopScheduledTask(taskId) {
     const timer = this.scheduledTaskTimers.get(taskId);
     if (timer)
-      clearTimeout(timer);
+      window.clearTimeout(timer);
     this.scheduledTaskTimers.delete(taskId);
   }
   getNextRunTime(task) {
@@ -5065,16 +5040,9 @@ ${prompt}`;
     for (const { token, file } of skippedLinkedFiles) {
       filteredSourceWithDataview = filteredSourceWithDataview.split(token).join(`[\u5DF2\u6309\u6392\u9664\u76EE\u5F55\u8DF3\u8FC7\uFF1A${file.path}]`);
     }
-    if (skippedLinkedFiles.length > 0) {
-      console.log(
-        `[\u5B9A\u65F6\u4EFB\u52A1] "${task.name}" \u5DF2\u6309\u76EE\u5F55\u89C4\u5219\u8DF3\u8FC7 ${skippedLinkedFiles.length} \u4E2A\u6587\u4EF6:`,
-        skippedLinkedFiles.map((item) => item.file.path)
-      );
-    }
     if (linkedFiles.length === 0) {
       throw new Error(`\u6E90\u6587\u4EF6 "${task.sourcePath}" \u7684\u67E5\u8BE2\u7ED3\u679C\u4E2D\u6CA1\u6709\u53EF\u5904\u7406\u6587\u4EF6\uFF08\u4EFB\u52A1\u6E90\u6587\u4EF6\u81EA\u8EAB\u53CA\u4EFB\u52A1\u5B9A\u4E49\u4E2D\u7684\u6392\u9664\u76EE\u5F55\u4F1A\u81EA\u52A8\u8DF3\u8FC7\uFF09\u3002`);
     }
-    console.log(`[\u5B9A\u65F6\u4EFB\u52A1] "${task.name}" \u5DF2\u8BC6\u522B ${linkedFiles.length} \u4E2A\u5173\u8054\u6587\u4EF6:`, linkedFiles.map((item) => item.file.path));
     let successCount = 0;
     const errors = [];
     for (const { token, file: linkedFile } of linkedFiles) {
@@ -5130,8 +5098,6 @@ ${linkedContent}
     }
     if (errors.length > 0) {
       const errorMsg = errors.join("\n");
-      console.error(`[\u5B9A\u65F6\u4EFB\u52A1] "${task.name}" \u90E8\u5206\u6587\u4EF6\u5904\u7406\u5931\u8D25:
-${errorMsg}`);
       if (successCount > 0) {
         new import_obsidian2.Notice(`\u5B9A\u65F6\u4EFB\u52A1 "${task.name}" \u5B8C\u6210 ${successCount} \u4E2A\u6587\u4EF6\uFF0C${errors.length} \u4E2A\u5931\u8D25`);
       } else {
@@ -5165,7 +5131,7 @@ ${errorMsg}`);
         } : void 0
       });
       const timeoutPromise = new Promise((_, reject) => {
-        timeoutHandle = setTimeout(() => {
+        timeoutHandle = window.setTimeout(() => {
           reject(new Error(`OpenCode \u5904\u7406\u8D85\u8FC7 ${timeoutMinutes} \u5206\u949F\uFF0C\u4EFB\u52A1\u5DF2\u7EC8\u6B62\u3002\u8BF7\u68C0\u67E5\u6A21\u578B\u3001\u5DE5\u5177\u6743\u9650\u6216 OpenCode \u670D\u52A1\u65E5\u5FD7\u3002`));
         }, timeoutMs);
       });
@@ -5180,7 +5146,7 @@ ${errorMsg}`);
       throw error;
     } finally {
       if (timeoutHandle)
-        clearTimeout(timeoutHandle);
+        window.clearTimeout(timeoutHandle);
       this.endProcessing("\u5B9A\u65F6\u4EFB\u52A1");
     }
   }
@@ -5206,7 +5172,6 @@ ${errorMsg}`);
       const accepted2 = await this.adapter.replyPermission(request2.requestId, choice2.reply, "\u7528\u6237\u5DF2\u6388\u6743\u5B9A\u65F6\u4EFB\u52A1\u5B8C\u5168\u63A7\u5236\u5E76\u81EA\u52A8\u7EE7\u7EED");
       if (!accepted2)
         throw new Error(`OpenCode \u6743\u9650\u81EA\u52A8\u6388\u6743\u5931\u8D25\uFF1A${request2.summary}`);
-      console.log(`[\u5B9A\u65F6\u4EFB\u52A1] \u5DF2\u81EA\u52A8\u6388\u6743\u6743\u9650\uFF1A${request2.summary} -> ${choice2.reply}`);
       return;
     }
     if (!this.adapter.replyQuestion) {
@@ -5219,7 +5184,6 @@ ${errorMsg}`);
     const accepted = await this.adapter.replyQuestion(request2.requestId, answers);
     if (!accepted)
       throw new Error(`OpenCode \u95EE\u9898\u81EA\u52A8\u56DE\u7B54\u5931\u8D25\uFF1A${request2.summary}`);
-    console.log(`[\u5B9A\u65F6\u4EFB\u52A1] \u5DF2\u81EA\u52A8\u56DE\u7B54\u95EE\u9898\uFF1A${request2.summary}`);
   }
   async expandPromptContent(content, sourcePath = "") {
     let output = content;
@@ -5281,7 +5245,7 @@ ${String(result.value || "").trim()}`;
     if (typeof dataviewApi.executeJs !== "function") {
       throw new Error("\u5F53\u524D Dataview \u7248\u672C\u4E0D\u652F\u6301 executeJs");
     }
-    const container = document.createElement("div");
+    const container = createDiv();
     const component = new import_obsidian2.Component();
     component.load();
     try {
@@ -5299,7 +5263,7 @@ ${String(result.value || "").trim()}`;
     let previous = "";
     let stableRounds = 0;
     for (let elapsed = 0; elapsed < 2e3; elapsed += 50) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
       const current = container.innerHTML;
       if (current && current === previous) {
         stableRounds++;
@@ -5359,7 +5323,7 @@ ${fileContent}
     }
   }
   async renderTaskEmailMarkdown(markdown, sourcePath) {
-    const container = document.createElement("div");
+    const container = createDiv();
     const component = new import_obsidian2.Component();
     component.load();
     try {
@@ -5453,7 +5417,6 @@ ${body}`;
     });
   }
   async onload() {
-    console.log("\u6B63\u5728\u52A0\u8F7D AI \u52A9\u624B\u63D2\u4EF6...");
     await this.loadSettings();
     const onMdChange = (file) => {
       var _a, _b;
@@ -5567,7 +5530,7 @@ ${body}`;
     var _a;
     this.stopAllScheduledTasks();
     if (this.processingNoticeTimer) {
-      clearInterval(this.processingNoticeTimer);
+      window.clearInterval(this.processingNoticeTimer);
       this.processingNoticeTimer = null;
     }
     if (this.processingNotice) {
@@ -5582,7 +5545,6 @@ ${body}`;
     } catch (e) {
     }
     this.vaultSearch = null;
-    console.log("\u5378\u8F7D AI \u52A9\u624B\u63D2\u4EF6");
   }
   /**
    * 创建适配器实例（根据当前 settings.cliBackend）
@@ -5702,7 +5664,7 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     const modelSetting = new import_obsidian2.Setting(containerEl).setName("\u9ED8\u8BA4\u6A21\u578B").setDesc("\u9009\u62E9\u5F53\u524D\u540E\u7AEF\u4F7F\u7528\u7684 AI \u6A21\u578B\u3002\u7559\u7A7A\u5219\u4F7F\u7528\u540E\u7AEF\u9ED8\u8BA4\u6A21\u578B\u3002");
     const currentModel = this.plugin.settings.selectedModel || "";
     const modelDisplayText = currentModel || "\u9ED8\u8BA4";
-    const modelDisplay = modelSetting.controlEl.createEl("span", {
+    modelSetting.controlEl.createSpan({
       text: modelDisplayText,
       cls: "iflow-setting-model-display"
     });

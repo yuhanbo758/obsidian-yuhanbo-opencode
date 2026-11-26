@@ -1,8 +1,8 @@
 {
 	"id": "yuhanbo-opencode",
 	"name": "yuhanbo-opencode",
-	"version": "1.3.3",
-	"minAppVersion": "1.5.7",
+	"version": "1.3.4",
+	"minAppVersion": "1.7.2",
 	"description": "Chat with notes, rewrite selections, and schedule recurring workflows with OpenCode.",
 	"author": "余汉波",
 	"authorUrl": "https://github.com/yuhanbo758",

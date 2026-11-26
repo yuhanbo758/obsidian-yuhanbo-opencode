@@ -1981,8 +1981,8 @@ var ChatSessionRenderer = class {
             answers[questionIndex] = next ? [next] : [];
             syncPicked();
           }
-          textarea.style.height = "0px";
-          textarea.style.height = `${textarea.scrollHeight}px`;
+          textarea.setCssStyles({ height: "0px" });
+          textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
         });
       }
     });
@@ -2977,8 +2977,8 @@ var ModelSuggestModal = class extends import_obsidian2.SuggestModal {
   }
   renderSuggestion(item, el) {
     if (item.provider) {
-      const container = el.createDiv({ cls: "model-suggest-item" });
-      container.createEl("div", { text: item.provider, cls: "model-suggest-provider" });
+      const container = el.createDiv({ cls: "iflow-model-suggest-item" });
+      container.createEl("div", { text: item.provider, cls: "iflow-model-suggest-provider" });
       container.createEl("div", { text: item.value.includes("/") ? item.value.split("/").slice(1).join("/") : item.label });
     } else {
       el.createEl("div", { text: item.label });
@@ -3005,9 +3005,9 @@ var SlashCommandSuggestModal = class extends import_obsidian2.SuggestModal {
     );
   }
   renderSuggestion(item, el) {
-    const row = el.createDiv({ cls: "slash-command-item" });
-    row.createEl("div", { text: item.command, cls: "slash-command-command" });
-    row.createEl("div", { text: item.description, cls: "slash-command-desc" });
+    const row = el.createDiv({ cls: "iflow-slash-command-item" });
+    row.createEl("div", { text: item.command, cls: "iflow-slash-command-command" });
+    row.createEl("div", { text: item.description, cls: "iflow-slash-command-desc" });
   }
   onChooseSuggestion(item, evt) {
     this.onChoose(item);
@@ -3029,7 +3029,7 @@ var PromptModal = class extends import_obsidian2.Modal {
     contentEl.addClass("iflow-prompt-modal");
     contentEl.createEl("h2", { text: this.mode === "replace" ? "\u66FF\u6362\u9009\u4E2D\u5185\u5BB9" : "\u63D2\u5165\u5185\u5BB9" });
     const textArea = new import_obsidian2.TextAreaComponent(contentEl).setPlaceholder("\u8F93\u5165\u63D0\u793A\u8BCD... (\u652F\u6301 / \u641C\u7D22\u6A21\u677F)").setValue(this.promptText);
-    textArea.inputEl.style.width = "100%";
+    textArea.inputEl.addClass("iflow-prompt-input");
     textArea.inputEl.rows = 4;
     textArea.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -3054,10 +3054,6 @@ var PromptModal = class extends import_obsidian2.Modal {
       this.promptText = value;
     });
     const buttonContainer = contentEl.createDiv({ cls: "iflow-modal-buttons" });
-    buttonContainer.style.marginTop = "15px";
-    buttonContainer.style.display = "flex";
-    buttonContainer.style.justifyContent = "flex-end";
-    buttonContainer.style.gap = "10px";
     new import_obsidian2.ButtonComponent(buttonContainer).setButtonText("\u53D6\u6D88").onClick(() => this.close());
     new import_obsidian2.ButtonComponent(buttonContainer).setButtonText("\u751F\u6210").setCta().onClick(() => {
       this.close();
@@ -3116,7 +3112,7 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
       dropdown.onChange((value) => {
         writeMode = value;
         if (writeModeTargetEl) {
-          writeModeTargetEl.style.display = writeMode === "save" ? "" : "none";
+          writeModeTargetEl.toggleClass("iflow-task-field-hidden", writeMode !== "save");
         }
       });
     });
@@ -3135,17 +3131,10 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
     }));
     writeModeTargetEl = targetSetting.settingEl;
     if (writeMode !== "save") {
-      writeModeTargetEl.style.display = "none";
+      writeModeTargetEl.addClass("iflow-task-field-hidden");
     }
     const modelSetting = new import_obsidian2.Setting(contentEl).setName("\u6267\u884C\u6A21\u578B").setDesc("\u7559\u7A7A\u5219\u4F7F\u7528\u63D2\u4EF6\u9ED8\u8BA4\u6A21\u578B");
-    const modelDisplay = modelSetting.controlEl.createEl("span", { cls: "setting-model-display" });
-    modelDisplay.style.marginRight = "8px";
-    modelDisplay.style.color = "var(--text-muted)";
-    modelDisplay.style.fontSize = "13px";
-    modelDisplay.style.maxWidth = "220px";
-    modelDisplay.style.overflow = "hidden";
-    modelDisplay.style.textOverflow = "ellipsis";
-    modelDisplay.style.whiteSpace = "nowrap";
+    const modelDisplay = modelSetting.controlEl.createEl("span", { cls: "iflow-setting-model-display iflow-task-model-display" });
     const refreshModelDisplay = () => {
       modelDisplay.textContent = model || "\u9ED8\u8BA4\uFF08\u8DDF\u968F\u5168\u5C40\u6A21\u578B\uFF09";
       modelDisplay.title = model || "\u9ED8\u8BA4\uFF08\u8DDF\u968F\u5168\u5C40\u6A21\u578B\uFF09";
@@ -3187,9 +3176,9 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
       dropdown.onChange((value) => {
         scheduleType = value;
         if (dailySettingEl)
-          dailySettingEl.style.display = scheduleType === "daily" ? "" : "none";
+          dailySettingEl.toggleClass("iflow-task-field-hidden", scheduleType !== "daily");
         if (onceSettingEl)
-          onceSettingEl.style.display = scheduleType === "once" ? "" : "none";
+          onceSettingEl.toggleClass("iflow-task-field-hidden", scheduleType !== "once");
       });
       scheduleTypeSetting = dropdown.selectEl;
     });
@@ -3208,16 +3197,13 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
     });
     onceSettingEl = onceSetting.settingEl;
     if (dailySettingEl)
-      dailySettingEl.style.display = scheduleType === "daily" ? "" : "none";
+      dailySettingEl.toggleClass("iflow-task-field-hidden", scheduleType !== "daily");
     if (onceSettingEl)
-      onceSettingEl.style.display = scheduleType === "once" ? "" : "none";
+      onceSettingEl.toggleClass("iflow-task-field-hidden", scheduleType !== "once");
     new import_obsidian2.Setting(contentEl).setName("\u5B8C\u6210\u540E\u53D1\u9001\u90AE\u4EF6").addToggle((toggle) => toggle.setValue(sendEmail).onChange((value) => {
       sendEmail = value;
     }));
-    const buttonRow = contentEl.createDiv();
-    buttonRow.style.display = "flex";
-    buttonRow.style.justifyContent = "flex-end";
-    buttonRow.style.gap = "10px";
+    const buttonRow = contentEl.createDiv({ cls: "iflow-task-modal-buttons" });
     const buildTask = () => {
       var _a2, _b2;
       if (!name.trim()) {
@@ -3316,461 +3302,6 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
     container.addClass("iflow-chat-container");
     this.rootContainer = container;
     this.setCompactMode(this.plugin.settings.compactMode);
-    container.createEl("style", {
-      text: `
-				.iflow-chat-container {
-					display: flex;
-					flex-direction: column;
-					height: 100%;
-					padding: 10px 10px 0 10px;
-				}
-				.iflow-messages {
-					flex: 1;
-					overflow-y: auto;
-					margin-bottom: 10px;
-					border: 1px solid var(--background-modifier-border);
-					border-radius: 5px;
-					padding: 10px;
-					background-color: var(--background-primary);
-				}
-				.iflow-message {
-					margin-bottom: 10px;
-					padding: 8px;
-					padding-bottom: 28px;
-					border-radius: 8px;
-					max-width: 90%;
-					position: relative;
-				}
-				.iflow-message:hover .iflow-copy-btn {
-					opacity: 1;
-				}
-				.iflow-copy-btn {
-					position: absolute;
-					top: auto;
-					bottom: 4px;
-					right: 6px;
-					opacity: 0;
-					cursor: pointer;
-					background: transparent;
-					border: none;
-					color: var(--text-muted);
-					padding: 4px;
-					transition: opacity 0.2s;
-					z-index: 10;
-				}
-				.iflow-message-content {
-					user-select: text;
-					-webkit-user-select: text;
-				}
-				.iflow-message.user .iflow-message-content {
-					white-space: pre-wrap;
-				}
-				.iflow-message.ai .iflow-message-content {
-					white-space: normal;
-				}
-				.iflow-message.ai .iflow-message-content.markdown-preview-view {
-					background: transparent;
-					padding: 0;
-				}
-				.iflow-message-progress {
-					font-size: 11px;
-					color: var(--text-muted);
-					margin-bottom: 6px;
-				}
-				.iflow-message-stream {
-					white-space: pre-wrap;
-				}
-				.iflow-message.user {
-					background-color: var(--interactive-accent);
-					color: var(--text-on-accent);
-					align-self: flex-end;
-					margin-left: auto;
-				}
-				.iflow-message.ai {
-					background-color: var(--background-secondary);
-					align-self: flex-start;
-					margin-right: auto;
-				}
-				.iflow-input-area {
-					display: flex;
-					flex-direction: column;
-					gap: 5px;
-				}
-				.iflow-input {
-					width: 100%;
-					resize: vertical;
-					min-height: 50px;
-					padding: 8px;
-				}
-				.iflow-toolbar {
-					display: flex;
-					justify-content: flex-end;
-					align-items: center;
-					margin-top: 5px;
-					gap: 8px;
-				}
-				.iflow-toolbar button {
-					font-size: 12px;
-					height: 24px;
-					padding: 0 8px;
-				}
-				.iflow-toolbar select {
-					font-size: 11px;
-					height: 24px;
-					padding: 0 4px;
-					border: 1px solid var(--background-modifier-border);
-					border-radius: 4px;
-					background-color: var(--background-primary);
-					color: var(--text-normal);
-					max-width: 140px;
-					cursor: pointer;
-				}
-				.iflow-model-select-btn {
-					font-size: 11px;
-					height: 24px;
-					padding: 0 8px;
-					border: 1px solid var(--background-modifier-border);
-					border-radius: 4px;
-					background-color: var(--background-primary);
-					color: var(--text-normal);
-					max-width: 160px;
-					cursor: pointer;
-					overflow: hidden;
-					text-overflow: ellipsis;
-					white-space: nowrap;
-				}
-				.iflow-model-select-btn:hover {
-					background-color: var(--background-modifier-hover);
-				}
-				/* \u5DE5\u5177\u8C03\u7528\u72B6\u6001\u5361\u7247 */
-				.iflow-tool-call {
-					margin-bottom: 6px;
-					border-radius: 6px;
-					border: 1px solid var(--background-modifier-border);
-					background-color: var(--background-primary-alt);
-					font-size: 12px;
-					overflow: hidden;
-					max-width: 90%;
-				}
-				.iflow-tool-call-header {
-					display: flex;
-					align-items: center;
-					gap: 6px;
-					padding: 5px 8px;
-					cursor: pointer;
-					user-select: none;
-					color: var(--text-muted);
-				}
-				.iflow-tool-call-header:hover {
-					background-color: var(--background-modifier-hover);
-				}
-				.iflow-tool-call-icon {
-					width: 14px;
-					height: 14px;
-					flex-shrink: 0;
-				}
-				.iflow-tool-call-name {
-					font-weight: 600;
-					color: var(--text-normal);
-					flex: 1;
-					white-space: nowrap;
-					overflow: hidden;
-					text-overflow: ellipsis;
-				}
-				.iflow-tool-call-status {
-					font-size: 11px;
-					padding: 1px 5px;
-					border-radius: 3px;
-					flex-shrink: 0;
-				}
-				.iflow-tool-call-status.running {
-					background-color: var(--color-yellow);
-					color: var(--color-yellow-fg, #000);
-				}
-				.iflow-tool-call-status.done {
-					background-color: var(--color-green);
-					color: var(--color-green-fg, #fff);
-				}
-				.iflow-tool-call-toggle {
-					font-size: 10px;
-					color: var(--text-faint);
-					flex-shrink: 0;
-				}
-				.iflow-tool-call-body {
-					padding: 4px 8px 6px 8px;
-					border-top: 1px solid var(--background-modifier-border);
-					font-family: var(--font-monospace);
-					font-size: 11px;
-					color: var(--text-muted);
-					white-space: pre-wrap;
-					word-break: break-all;
-					max-height: 200px;
-					overflow-y: auto;
-					display: none;
-				}
-				.iflow-tool-call-body.open {
-					display: block;
-				}
-				.iflow-action-request {
-					margin: 8px 0;
-					border: 1px solid var(--background-modifier-border);
-					border-radius: 8px;
-					background: var(--background-primary);
-					overflow: hidden;
-				}
-				.iflow-action-request-header {
-					display: flex;
-					flex-direction: column;
-					align-items: stretch;
-					gap: 6px;
-					padding: 8px 10px;
-					border-bottom: 1px solid var(--background-modifier-border);
-				}
-				.iflow-action-request-top {
-					display: flex;
-					align-items: flex-start;
-					gap: 8px;
-					min-width: 0;
-				}
-				.iflow-action-request-icon {
-					width: 16px;
-					height: 16px;
-					color: var(--interactive-accent);
-					flex-shrink: 0;
-					margin-top: 2px;
-				}
-				.iflow-action-request-title {
-					font-weight: 600;
-					flex: 1;
-					min-width: 0;
-					line-height: 1.45;
-					overflow-wrap: anywhere;
-				}
-				.iflow-action-request-status {
-					display: block;
-					align-self: flex-start;
-					font-size: 11px;
-					padding: 2px 6px;
-					border-radius: 4px;
-					color: var(--text-on-accent);
-					background: var(--interactive-accent);
-					white-space: normal;
-					word-break: break-word;
-					max-width: 100%;
-				}
-				.iflow-action-request-status.resolved {
-					background: var(--color-green);
-					color: var(--color-green-fg, #fff);
-				}
-				.iflow-action-request-detail {
-					margin: 0;
-					padding: 8px 10px;
-					white-space: pre-wrap;
-					font-family: var(--font-interface);
-					font-size: 12px;
-					color: var(--text-muted);
-					background: transparent;
-					overflow-wrap: anywhere;
-				}
-				.iflow-question-block {
-					padding: 10px;
-					border-bottom: 1px solid var(--background-modifier-border);
-				}
-				.iflow-question-progress {
-					font-size: 11px;
-					color: var(--text-muted);
-					margin-bottom: 6px;
-				}
-				.iflow-question-text {
-					font-weight: 600;
-					margin-bottom: 4px;
-					overflow-wrap: anywhere;
-				}
-				.iflow-question-hint {
-					font-size: 12px;
-					color: var(--text-muted);
-					margin-bottom: 8px;
-				}
-				.iflow-question-options {
-					display: flex;
-					flex-direction: column;
-					gap: 6px;
-				}
-			.iflow-question-option {
-					display: flex;
-					align-items: flex-start;
-					gap: 8px;
-					width: 100%;
-					padding: 7px 9px;
-					border: 1px solid var(--background-modifier-border);
-					border-radius: 6px;
-					background: var(--background-secondary);
-					color: var(--text-normal);
-					text-align: left;
-					cursor: pointer;
-					overflow: hidden;
-					box-sizing: border-box;
-				}
-				.iflow-question-option.is-picked {
-					border-color: var(--interactive-accent);
-					background: var(--background-modifier-hover);
-				}
-				.iflow-question-option-mark {
-					width: 14px;
-					height: 14px;
-					margin-top: 2px;
-					border: 1px solid var(--text-muted);
-					border-radius: 4px;
-					flex-shrink: 0;
-				}
-				.iflow-question-option[role="radio"] .iflow-question-option-mark {
-					border-radius: 50%;
-				}
-				.iflow-question-option.is-picked .iflow-question-option-mark {
-					background: var(--interactive-accent);
-					border-color: var(--interactive-accent);
-					box-shadow: inset 0 0 0 3px var(--background-primary);
-				}
-			.iflow-question-option-main {
-					display: flex;
-					flex-direction: column;
-					gap: 2px;
-					min-width: 0;
-					overflow: hidden;
-				}
-				.iflow-question-option-label {
-					font-size: 13px;
-					font-weight: 600;
-					overflow-wrap: anywhere;
-				}
-			.iflow-question-option-desc {
-					font-size: 12px;
-					color: var(--text-muted);
-					overflow-wrap: anywhere;
-					word-break: break-word;
-					white-space: normal;
-				}
-				.iflow-question-custom {
-					margin-top: 8px;
-				}
-				.iflow-question-custom-input {
-					width: 100%;
-					min-height: 32px;
-					resize: vertical;
-					padding: 6px 8px;
-					border: 1px solid var(--background-modifier-border);
-					border-radius: 6px;
-					background: var(--background-primary);
-					color: var(--text-normal);
-				}
-				.iflow-action-request-actions {
-					display: flex;
-					flex-wrap: wrap;
-					gap: 8px;
-					justify-content: flex-end;
-					padding: 10px;
-				}
-				.iflow-action-btn {
-					font-size: 12px;
-					min-height: 26px;
-					padding: 4px 10px;
-					border-radius: 6px;
-					border: 1px solid var(--background-modifier-border);
-					background: var(--background-secondary);
-					color: var(--text-normal);
-					cursor: pointer;
-				}
-				.iflow-action-btn-primary,
-				.iflow-action-btn-success {
-					background: var(--interactive-accent);
-					color: var(--text-on-accent);
-					border-color: var(--interactive-accent);
-				}
-				.iflow-action-btn-danger {
-					color: var(--text-error);
-					border-color: var(--text-error);
-				}
-				.iflow-action-btn:disabled {
-					opacity: 0.65;
-					cursor: default;
-				}
-				.iflow-chat-container.iflow-compact {
-					padding: 4px 4px 0 4px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-messages {
-					margin-bottom: 4px;
-					padding: 6px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-message {
-					margin-bottom: 5px;
-					padding: 5px 6px 22px 6px;
-					border-radius: 6px;
-					max-width: 96%;
-				}
-				.iflow-chat-container.iflow-compact .iflow-message-progress {
-					margin-bottom: 3px;
-					font-size: 10px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-tool-call {
-					margin-bottom: 3px;
-					max-width: 96%;
-					font-size: 11px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-tool-call-header {
-					padding: 3px 6px;
-					gap: 4px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-tool-call-body {
-					padding: 3px 6px 4px 6px;
-					font-size: 10px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-action-request {
-					margin: 5px 0;
-					border-radius: 6px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-action-request-header,
-				.iflow-chat-container.iflow-compact .iflow-action-request-detail {
-					padding: 5px 7px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-question-block {
-					padding: 7px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-question-option {
-					padding: 5px 7px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-action-request-actions {
-					gap: 5px;
-					padding: 7px;
-				}
-				.iflow-chat-container.iflow-compact .iflow-input {
-					min-height: 42px;
-					padding: 6px;
-				}
-				.model-suggest-item {
-					display: flex;
-					flex-direction: column;
-					gap: 2px;
-				}
-				.model-suggest-provider {
-					font-size: 11px;
-					color: var(--text-muted);
-					font-weight: 600;
-				}
-				.slash-command-item {
-					display: flex;
-					flex-direction: column;
-					gap: 2px;
-				}
-				.slash-command-command {
-					font-size: 12px;
-					font-weight: 600;
-				}
-				.slash-command-desc {
-					font-size: 11px;
-					color: var(--text-muted);
-				}
-			`
-    });
     this.messageContainer = container.createDiv({ cls: "iflow-messages" });
     this.appendMessage("ai", `\u4F60\u597D\uFF01\u6211\u662F ${this.plugin.getBackendDisplayName()} \u667A\u80FD\u52A9\u624B\u3002
 \u60A8\u53EF\u4EE5\u62D6\u62FD\u6587\u4EF6/\u6587\u4EF6\u5939\u5230\u6B64\u5904\u8FDB\u884C\u5904\u7406\u3002`);
@@ -3848,16 +3379,16 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
     });
     this.inputTextArea.addEventListener("dragover", (e) => {
       e.preventDefault();
-      this.inputTextArea.style.borderColor = "var(--interactive-accent)";
+      this.inputTextArea.addClass("iflow-drag-over");
     });
     this.inputTextArea.addEventListener("dragleave", (e) => {
       e.preventDefault();
-      this.inputTextArea.style.borderColor = "";
+      this.inputTextArea.removeClass("iflow-drag-over");
     });
     this.inputTextArea.addEventListener("drop", async (e) => {
       var _a2;
       e.preventDefault();
-      this.inputTextArea.style.borderColor = "";
+      this.inputTextArea.removeClass("iflow-drag-over");
       if (!e.dataTransfer)
         return;
       const absPaths = extractAbsolutePathsFromDataTransfer(this.plugin.app, e.dataTransfer);
@@ -5462,9 +4993,8 @@ ${prompt}`;
         await this.app.vault.create(targetPath, responseText);
       }
       if (this.settings.emailEnabled && this.settings.emailTo && task.sendEmail) {
-        const div = document.createElement("div");
-        await import_obsidian2.MarkdownRenderer.render(this.app, responseText, div, targetPath, this);
-        const htmlBody = `<h1>\u5B9A\u65F6\u4EFB\u52A1 "${task.name}" \u6267\u884C\u6210\u529F</h1><hr>` + div.innerHTML;
+        const renderedMarkdown = await this.renderTaskEmailMarkdown(responseText, targetPath);
+        const htmlBody = `<h1>\u5B9A\u65F6\u4EFB\u52A1 "${task.name}" \u6267\u884C\u6210\u529F</h1><hr>` + renderedMarkdown;
         await this.sendEmail(this.settings.emailTo, `OpenCode \u5B9A\u65F6\u4EFB\u52A1: ${task.name}`, htmlBody);
         new import_obsidian2.Notice(`\u90AE\u4EF6\u5DF2\u53D1\u9001\u81F3 ${this.settings.emailTo}`);
       }
@@ -5550,10 +5080,9 @@ ${linkedContent}
         }
         successCount++;
         if (this.settings.emailEnabled && this.settings.emailTo && task.sendEmail) {
-          const div = document.createElement("div");
-          await import_obsidian2.MarkdownRenderer.render(this.app, cleanedResponse, div, linkedFile.path, this);
+          const renderedMarkdown = await this.renderTaskEmailMarkdown(cleanedResponse, linkedFile.path);
           const modeLabel = writeMode === "insert" ? "\u63D2\u5165" : "\u66FF\u6362";
-          const htmlBody = `<h1>\u5B9A\u65F6\u4EFB\u52A1 "${task.name}" - ${modeLabel} "${linkedFile.path}"</h1><hr>` + div.innerHTML;
+          const htmlBody = `<h1>\u5B9A\u65F6\u4EFB\u52A1 "${task.name}" - ${modeLabel} "${linkedFile.path}"</h1><hr>` + renderedMarkdown;
           await this.sendEmail(
             this.settings.emailTo,
             `OpenCode \u5B9A\u65F6\u4EFB\u52A1: ${task.name} - ${modeLabel} ${linkedFile.name}`,
@@ -5794,6 +5323,17 @@ ${fileContent}
       }
     }
   }
+  async renderTaskEmailMarkdown(markdown, sourcePath) {
+    const container = document.createElement("div");
+    const component = new import_obsidian2.Component();
+    component.load();
+    try {
+      await import_obsidian2.MarkdownRenderer.render(this.app, markdown, container, sourcePath, component);
+      return container.innerHTML;
+    } finally {
+      component.unload();
+    }
+  }
   async sendEmail(to, subject, htmlBody) {
     this.requireAutomationLicense();
     if (!this.settings.emailEnabled)
@@ -5985,7 +5525,7 @@ ${body}`;
       }
     }
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      await workspace.revealLeaf(leaf);
     }
   }
   async onunload() {
@@ -6109,14 +5649,14 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.addClass("iflow-settings");
-    containerEl.createEl("h2", { text: "AI \u52A9\u624B\u8BBE\u7F6E" });
+    new import_obsidian2.Setting(containerEl).setName("AI \u52A9\u624B\u8BBE\u7F6E").setHeading();
     containerEl.createEl("p", {
       text: "\u6309\u8FDE\u63A5\u3001Obsidian \u64CD\u4F5C\u3001\u5185\u5BB9\u8D44\u6E90\u3001\u804A\u5929\u3001\u641C\u7D22\u548C\u81EA\u52A8\u5316\u5206\u7C7B\u914D\u7F6E\u3002\u4FEE\u6539\u540E\u81EA\u52A8\u4FDD\u5B58\u3002",
       cls: "iflow-settings-intro"
     });
     const addSection = (title, description) => {
       const header = containerEl.createDiv({ cls: "iflow-settings-section" });
-      header.createEl("h3", { text: title });
+      new import_obsidian2.Setting(header).setName(title).setHeading();
       header.createEl("p", { text: description });
     };
     addSection("1. \u8FDE\u63A5\u4E0E\u6A21\u578B", "\u914D\u7F6E OpenCode \u670D\u52A1\u3001\u542F\u52A8\u65B9\u5F0F\u548C\u6240\u6709\u4EFB\u52A1\u9ED8\u8BA4\u4F7F\u7528\u7684\u6A21\u578B\u3002");
@@ -6129,15 +5669,8 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     const modelDisplayText = currentModel || "\u9ED8\u8BA4";
     const modelDisplay = modelSetting.controlEl.createEl("span", {
       text: modelDisplayText,
-      cls: "setting-model-display"
+      cls: "iflow-setting-model-display"
     });
-    modelDisplay.style.marginRight = "8px";
-    modelDisplay.style.color = "var(--text-muted)";
-    modelDisplay.style.fontSize = "13px";
-    modelDisplay.style.maxWidth = "200px";
-    modelDisplay.style.overflow = "hidden";
-    modelDisplay.style.textOverflow = "ellipsis";
-    modelDisplay.style.whiteSpace = "nowrap";
     modelSetting.addButton((btn) => {
       btn.setButtonText("\u9009\u62E9\u6A21\u578B").onClick(() => {
         const backend = "opencode";

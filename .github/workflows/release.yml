@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: obsidian-release-${{ inputs.version || github.ref_name }}
@@ -43,3 +45,10 @@ jobs:
             exit 0
           fi
           gh release create "$VERSION" main.js manifest.json styles.css --verify-tag --title "$VERSION" --generate-notes
+      - name: Attest verified release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css

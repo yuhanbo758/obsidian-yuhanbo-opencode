@@ -52,7 +52,7 @@ var require_skills_paths = __commonJS({
         v = v.slice(2);
       return v.trim();
     }
-    function parseTemplatePaths2(value) {
+    function parseTemplatePaths3(value) {
       const rawList = [];
       if (Array.isArray(value)) {
         for (const v of value) {
@@ -76,12 +76,12 @@ var require_skills_paths = __commonJS({
       }
       return out;
     }
-    function isLikelyWindowsAbsolutePath2(value) {
+    function isLikelyWindowsAbsolutePath3(value) {
       return /^[a-zA-Z]:[\\/]/.test(value);
     }
     module2.exports = {
-      parseTemplatePaths: parseTemplatePaths2,
-      isLikelyWindowsAbsolutePath: isLikelyWindowsAbsolutePath2,
+      parseTemplatePaths: parseTemplatePaths3,
+      isLikelyWindowsAbsolutePath: isLikelyWindowsAbsolutePath3,
       normalizeSettingPath
     };
   }
@@ -91,7 +91,7 @@ var require_skills_paths = __commonJS({
 var require_weighted_search = __commonJS({
   "src/weighted-search.js"(exports, module2) {
     var CJK_RE = /[\u4e00-\u9fff]/;
-    function splitKeywords(input) {
+    function splitKeywords2(input) {
       const text = String(input != null ? input : "").trim();
       if (!text)
         return [];
@@ -250,7 +250,7 @@ var require_weighted_search = __commonJS({
       doc.contentLower = lower;
       return lower;
     }
-    var WeightedSearchIndex = class {
+    var WeightedSearchIndex2 = class {
       constructor(options) {
         this.options = options || {};
         this.docs = /* @__PURE__ */ new Map();
@@ -307,7 +307,7 @@ var require_weighted_search = __commonJS({
       }
       search(query, options) {
         var _a, _b;
-        const keywords = splitKeywords(query);
+        const keywords = splitKeywords2(query);
         const topN = typeof (options == null ? void 0 : options.topN) === "number" && options.topN > 0 ? Math.floor(options.topN) : 20;
         const weights = (options == null ? void 0 : options.weights) && typeof options.weights === "object" ? options.weights : {};
         const k1 = typeof (options == null ? void 0 : options.k1) === "number" ? options.k1 : typeof ((_a = this.options) == null ? void 0 : _a.k1) === "number" ? this.options.k1 : 1.2;
@@ -400,8 +400,8 @@ var require_weighted_search = __commonJS({
       }
     };
     module2.exports = {
-      splitKeywords,
-      WeightedSearchIndex,
+      splitKeywords: splitKeywords2,
+      WeightedSearchIndex: WeightedSearchIndex2,
       buildHighlights
     };
   }
@@ -416,6 +416,9 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian2 = require("obsidian");
+
+// src/adapter/opencode-adapter.ts
+var http = __toESM(require("http"));
 
 // src/session/message-utils.ts
 function normalizeToolArgs(input) {
@@ -458,6 +461,7 @@ function firstMeaningfulToolPayload(...candidates) {
   return void 0;
 }
 function formatToolArgsText(input) {
+  var _a;
   if (input === void 0 || input === null)
     return "";
   if (typeof input === "string")
@@ -465,7 +469,7 @@ function formatToolArgsText(input) {
   if (typeof input === "number" || typeof input === "boolean")
     return String(input);
   try {
-    return JSON.stringify(input, null, 2);
+    return (_a = JSON.stringify(input, null, 2)) != null ? _a : String(input);
   } catch (e) {
     return String(input);
   }
@@ -477,10 +481,11 @@ function formatToolDisplayText(input) {
   return text;
 }
 function formatToolArgsJson(input) {
+  var _a;
   if (input === void 0 || input === null)
     return "";
   try {
-    return JSON.stringify(input);
+    return (_a = JSON.stringify(input)) != null ? _a : "";
   } catch (e) {
     return "";
   }
@@ -575,10 +580,35 @@ function waitForPort(port, timeoutMs) {
   });
 }
 
+// src/core/json-value.ts
+function isJsonObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function jsonObject(value) {
+  return isJsonObject(value) ? value : void 0;
+}
+function jsonArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+function jsonText(value) {
+  if (typeof value === "string")
+    return value;
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
+  return "";
+}
+
 // src/adapter/opencode-adapter.ts
 function getOpenCodeMessageRole(message) {
   var _a, _b, _c;
-  return String((_c = (_b = (_a = message == null ? void 0 : message.info) == null ? void 0 : _a.role) != null ? _b : message == null ? void 0 : message.role) != null ? _c : "");
+  const entry = jsonObject(message);
+  return jsonText((_c = (_b = (_a = jsonObject(entry == null ? void 0 : entry.info)) == null ? void 0 : _a.role) != null ? _b : entry == null ? void 0 : entry.role) != null ? _c : "");
+}
+function openCodeErrorText(error, fallback) {
+  var _a;
+  const detail = jsonObject(error);
+  const message = ((_a = jsonObject(detail == null ? void 0 : detail.data)) == null ? void 0 : _a.message) || (detail == null ? void 0 : detail.message) || (detail == null ? void 0 : detail.name);
+  return typeof message === "string" && message ? message : fallback;
 }
 var OpenCodeAdapter = class {
   constructor(settings, vaultPath) {
@@ -624,6 +654,7 @@ var OpenCodeAdapter = class {
     this.promptRequestSeq = 0;
     /** 当前对话轮次令牌，旧轮次事件不应污染当前输出 */
     this.currentTurnToken = "";
+    this.armSilenceCheck = null;
     this.settings = settings;
     this.vaultPath = vaultPath;
   }
@@ -650,7 +681,6 @@ var OpenCodeAdapter = class {
         if (await checkPort(portToUse)) {
           throw new Error(`\u7AEF\u53E3 ${portToUse} \u5DF2\u88AB\u5360\u7528\u4E14\u672A\u901A\u8FC7 OpenCode \u5065\u5EB7\u68C0\u67E5\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u6216\u66F4\u6362\u7AEF\u53E3`);
         }
-        console.log(`[OpenCode] \u5C1D\u8BD5\u81EA\u52A8\u542F\u52A8 HTTP \u670D\u52A1\u5668 (port=${portToUse})...`);
         const started = await this.startProcess(portToUse, cwdToUse);
         if (!started)
           throw new Error("\u65E0\u6CD5\u542F\u52A8 opencode \u670D\u52A1\u5668");
@@ -674,7 +704,6 @@ var OpenCodeAdapter = class {
                 (_a = this.process) == null ? void 0 : _a.removeListener("exit", onExit);
                 return done(false);
               }
-              console.log(`[OpenCode] TCP \u7AEF\u53E3 ${portToUse} \u5DF2\u53EF\u8FBE\uFF0C\u7B49\u5F85 HTTP \u670D\u52A1\u5C31\u7EEA...`);
               this.waitForHealthy(15e3).then((healthy2) => {
                 var _a2;
                 (_a2 = this.process) == null ? void 0 : _a2.removeListener("exit", onExit);
@@ -693,7 +722,6 @@ var OpenCodeAdapter = class {
           throw new Error(`opencode \u670D\u52A1\u5668\u542F\u52A8\u8D85\u65F6 (port=${portToUse})\uFF0C\u8BF7\u68C0\u67E5 opencode \u662F\u5426\u6B63\u786E\u5B89\u88C5\u3002`);
         }
       }
-      console.log(`[OpenCode] HTTP \u670D\u52A1\u5668\u7AEF\u53E3 ${portToUse} \u5DF2\u5C31\u7EEA`);
     }
     const healthy = await this.checkHealth();
     if (!healthy) {
@@ -702,15 +730,16 @@ var OpenCodeAdapter = class {
     try {
       const sessionPayload = { title: "Obsidian Chat" };
       const sessionPath = cwdToUse ? `/session?directory=${encodeURIComponent(cwdToUse)}` : "/session";
-      const sessionData = await this.httpRequest("POST", sessionPath, sessionPayload);
+      const sessionData = jsonObject(await this.httpRequest("POST", sessionPath, sessionPayload));
+      if (typeof (sessionData == null ? void 0 : sessionData.id) !== "string" || !sessionData.id) {
+        throw new Error("OpenCode \u672A\u8FD4\u56DE\u6709\u6548\u7684\u4F1A\u8BDD ID");
+      }
       this.sessionId = sessionData.id;
-      console.log(`[OpenCode] \u5DF2\u521B\u5EFA session: ${this.sessionId}, directory=${cwdToUse}`);
     } catch (e) {
-      throw new Error(`\u521B\u5EFA OpenCode session \u5931\u8D25: ${e.message}`);
+      throw new Error(`\u521B\u5EFA OpenCode session \u5931\u8D25: ${openCodeErrorText(e, String(e))}`);
     }
     this.connected = true;
     await this.connectSSEAndWait();
-    console.log(`[OpenCode] \u5DF2\u8FDE\u63A5\u5230 ${this.baseUrl}`);
   }
   async disconnect() {
     this.connected = false;
@@ -724,6 +753,7 @@ var OpenCodeAdapter = class {
     this.liveAssistantText = "";
     this.publishedFinalAnswer = "";
     this.currentTurnToken = "";
+    this.armSilenceCheck = null;
     this.pendingMessages = [];
     if (this.pendingResolve) {
       const resolve = this.pendingResolve;
@@ -852,9 +882,8 @@ var OpenCodeAdapter = class {
       }, 9e4);
     };
     armSilenceCheck();
-    this._armSilenceCheck = armSilenceCheck;
+    this.armSilenceCheck = armSilenceCheck;
     const effectiveModel = modelOverride != null ? modelOverride : this.settings.selectedModel;
-    console.log(`[OpenCode] \u53D1\u9001\u6D88\u606F\u5230 session ${this.sessionId}, SSE\u5DF2\u8FDE\u63A5: ${this.sseConnected}, \u6A21\u578B: ${effectiveModel || "(\u9ED8\u8BA4)"}`);
     const body = {
       parts: [{ type: "text", text: prompt }]
     };
@@ -890,10 +919,10 @@ var OpenCodeAdapter = class {
       this.activePromptRequest = null;
       if (this.stopStreaming || !this.waitingForReply)
         return;
-      console.error(`[OpenCode] /prompt_async \u8BF7\u6C42\u5931\u8D25:`, (e == null ? void 0 : e.message) || e);
+      console.error(`[OpenCode] /prompt_async \u8BF7\u6C42\u5931\u8D25:`, openCodeErrorText(e, String(e)));
       this.waitingForReply = false;
       this.errorSent = true;
-      this.pushMessage({ type: "error", message: (e == null ? void 0 : e.message) || "\u53D1\u9001\u6D88\u606F\u5931\u8D25" });
+      this.pushMessage({ type: "error", message: openCodeErrorText(e, "\u53D1\u9001\u6D88\u606F\u5931\u8D25") });
     });
   }
   async replyQuestion(requestId, answers) {
@@ -912,7 +941,7 @@ var OpenCodeAdapter = class {
       this.resolvePendingAction("question", id, `\u5DF2\u56DE\u590D\uFF1A${cleaned.map((group) => group.join(", ")).join("\uFF1B")}`, false, { answers: cleaned }, "question.local_reply");
       return true;
     } catch (e) {
-      console.warn(`[OpenCode] \u56DE\u590D question \u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`);
+      console.warn(`[OpenCode] \u56DE\u590D question \u5931\u8D25: ${openCodeErrorText(e, String(e))}`);
       return false;
     }
   }
@@ -929,7 +958,7 @@ var OpenCodeAdapter = class {
       this.resolvePendingAction("question", id, "\u5DF2\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54", true, void 0, "question.local_reply");
       return true;
     } catch (e) {
-      console.warn(`[OpenCode] \u53D6\u6D88 question \u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`);
+      console.warn(`[OpenCode] \u53D6\u6D88 question \u5931\u8D25: ${openCodeErrorText(e, String(e))}`);
       return false;
     }
   }
@@ -946,7 +975,7 @@ var OpenCodeAdapter = class {
       this.resolvePendingAction("permission", id, `\u5DF2\u9009\u62E9\uFF1A${normalizedReply}`, normalizedReply === "reject", { reply: normalizedReply }, "permission.local_reply");
       return true;
     } catch (e) {
-      console.warn(`[OpenCode] \u56DE\u590D permission \u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`);
+      console.warn(`[OpenCode] \u56DE\u590D permission \u5931\u8D25: ${openCodeErrorText(e, String(e))}`);
       return false;
     }
   }
@@ -962,12 +991,16 @@ var OpenCodeAdapter = class {
   }
   // ---- 内部方法 ----
   async isQuestionStillPending(requestId) {
+    var _a, _b;
     try {
       const response = await this.httpRequest("GET", this.withDirectoryQuery("/question"), void 0, { timeoutMs: 5e3 });
-      const list = Array.isArray(response) ? response : Array.isArray(response == null ? void 0 : response.value) ? response.value : [];
-      return list.some((item) => String((item == null ? void 0 : item.id) || (item == null ? void 0 : item.requestID) || "").trim() === requestId);
+      const list = jsonArray((_b = (_a = jsonObject(response)) == null ? void 0 : _a.value) != null ? _b : response);
+      return list.some((item) => {
+        const request2 = jsonObject(item);
+        return jsonText((request2 == null ? void 0 : request2.id) || (request2 == null ? void 0 : request2.requestID) || "").trim() === requestId;
+      });
     } catch (e) {
-      console.warn(`[OpenCode] \u65E0\u6CD5\u786E\u8BA4 question \u662F\u5426\u5DF2\u6E05\u9664: ${(e == null ? void 0 : e.message) || e}`);
+      console.warn(`[OpenCode] \u65E0\u6CD5\u786E\u8BA4 question \u662F\u5426\u5DF2\u6E05\u9664: ${openCodeErrorText(e, String(e))}`);
       return false;
     }
   }
@@ -1088,33 +1121,35 @@ var OpenCodeAdapter = class {
     if (!this.waitingForReply || !this.sessionId)
       return;
     try {
-      const messages = await this.httpRequest("GET", `/session/${this.sessionId}/message`, void 0, { timeoutMs: 15e3 });
+      const response = await this.httpRequest("GET", `/session/${this.sessionId}/message`, void 0, { timeoutMs: 15e3 });
       if (!this.waitingForReply)
         return;
-      if (!Array.isArray(messages))
+      if (!Array.isArray(response))
         return;
+      const messages = jsonArray(response).filter(isJsonObject);
       let lastAssistantText = "";
       for (let i = messages.length - 1; i >= 0; i--) {
         const msg = messages[i];
         if (getOpenCodeMessageRole(msg) === "assistant") {
-          const parts = Array.isArray(msg.parts) ? msg.parts : [];
-          const textParts = parts.filter((p) => (p == null ? void 0 : p.type) === "text" && typeof p.text === "string");
-          if (textParts.length > 0) {
-            lastAssistantText = textParts.map((p) => p.text).join("");
-          }
+          lastAssistantText = jsonArray(msg.parts).flatMap((value) => {
+            const part = jsonObject(value);
+            return (part == null ? void 0 : part.type) === "text" && typeof part.text === "string" ? [part.text] : [];
+          }).join("");
           break;
         }
       }
       if (lastAssistantText.trim()) {
-        console.log("[OpenCode] \u4ECE /message \u62C9\u53D6\u5230\u6700\u7EC8\u56DE\u590D\uFF0C\u5F3A\u5236\u5B8C\u6210");
         this.liveAssistantText = lastAssistantText;
         this.finishCurrentReply();
       } else {
         const hasToolParts = messages.some(
-          (msg) => getOpenCodeMessageRole(msg) === "assistant" && Array.isArray(msg.parts) && msg.parts.some((p) => (p == null ? void 0 : p.type) === "tool" || typeof (p == null ? void 0 : p.type) === "string" && p.type.includes("tool"))
+          (msg) => getOpenCodeMessageRole(msg) === "assistant" && jsonArray(msg.parts).some((value) => {
+            var _a;
+            const type = (_a = jsonObject(value)) == null ? void 0 : _a.type;
+            return typeof type === "string" && type.includes("tool");
+          })
         );
         if (hasToolParts) {
-          console.log("[OpenCode] /message \u672A\u627E\u5230 assistant \u6587\u672C\uFF0C\u4F46\u6709\u5DE5\u5177\u8C03\u7528\uFF0C\u5F3A\u5236\u5B8C\u6210");
           this.finishCurrentReply();
         } else {
           console.warn("[OpenCode] /message \u672A\u627E\u5230 assistant \u6587\u672C\u6216\u5DE5\u5177\u8C03\u7528\uFF0C\u7EE7\u7EED\u7B49\u5F85 60s...");
@@ -1125,13 +1160,12 @@ var OpenCodeAdapter = class {
         }
       }
     } catch (e) {
-      console.error("[OpenCode] \u62C9\u53D6 /message \u5931\u8D25:", (e == null ? void 0 : e.message) || e);
+      console.error("[OpenCode] \u62C9\u53D6 /message \u5931\u8D25:", openCodeErrorText(e, String(e)));
     }
   }
   /** 连接 SSE 事件流并等待 server.connected 事件 */
   connectSSEAndWait() {
     return new Promise((resolve) => {
-      const http = require("http");
       const headers = { "Accept": "text/event-stream" };
       if (this.authHeader)
         headers["Authorization"] = this.authHeader;
@@ -1163,7 +1197,6 @@ var OpenCodeAdapter = class {
           }
           this.sseRequest = null;
         }
-        console.log(`[OpenCode] \u6B63\u5728\u8FDE\u63A5 SSE: ${this.baseUrl}/global/event`);
         this.sseRequest = http.get(`${this.baseUrl}/global/event`, { headers, timeout: 0 }, (res) => {
           var _a;
           if (res.statusCode !== 200) {
@@ -1175,11 +1208,11 @@ var OpenCodeAdapter = class {
             scheduleRetry(3e3);
             return;
           }
-          console.log(`[OpenCode] SSE HTTP \u8FDE\u63A5\u6210\u529F, \u7B49\u5F85\u4E8B\u4EF6...`);
           let buffer = "";
+          res.setEncoding("utf8");
           res.on("data", (chunk) => {
             var _a2;
-            buffer += chunk.toString();
+            buffer += chunk;
             const { frames, remainder } = this.splitSSEFrames(buffer);
             buffer = remainder;
             for (const frame of frames) {
@@ -1187,25 +1220,25 @@ var OpenCodeAdapter = class {
               try {
                 payload = this.parseSSEPayload(frame);
               } catch (e) {
-                console.error("[OpenCode] SSE \u4E8B\u4EF6\u89E3\u6790\u5931\u8D25:", e, "raw:", frame.substring(0, 200));
+                console.error("[OpenCode] SSE \u4E8B\u4EF6\u89E3\u6790\u5931\u8D25");
                 continue;
               }
               if (!payload)
                 continue;
-              if (!this.sseConnected && ((_a2 = payload == null ? void 0 : payload.payload) == null ? void 0 : _a2.type) === "server.connected") {
+              if (!this.sseConnected && ((_a2 = jsonObject(payload.payload)) == null ? void 0 : _a2.type) === "server.connected") {
                 this.sseConnected = true;
-                console.log(`[OpenCode] SSE server.connected \u4E8B\u4EF6\u6536\u5230`);
                 done();
               }
               this.handleSSEEvent(payload);
             }
           });
           res.on("end", () => {
-            console.log("[OpenCode] SSE \u8FDE\u63A5\u65AD\u5F00");
             this.sseConnected = false;
             scheduleRetry(2e3);
           });
           res.on("error", (e) => {
+            if (!this.connected)
+              return;
             console.error("[OpenCode] SSE \u9519\u8BEF:", e.message);
             this.sseConnected = false;
             scheduleRetry(3e3);
@@ -1262,7 +1295,7 @@ var OpenCodeAdapter = class {
     }
     if (currentSessionId) {
       void this.httpRequest("POST", `/session/${currentSessionId}/abort`, void 0, { timeoutMs: 1e4 }).catch((error) => {
-        console.warn(`[OpenCode] \u8D85\u65F6\u540E abort session \u5931\u8D25: ${(error == null ? void 0 : error.message) || error}`);
+        console.warn(`[OpenCode] \u8D85\u65F6\u540E abort session \u5931\u8D25: ${openCodeErrorText(error, String(error))}`);
       });
     }
     this.pushMessage({ type: "error", message });
@@ -1270,28 +1303,29 @@ var OpenCodeAdapter = class {
   }
   getQuestionRequestId(props) {
     var _a, _b, _c, _d, _e;
-    return String((_e = (_d = (_b = (_a = props == null ? void 0 : props.id) != null ? _a : props == null ? void 0 : props.requestID) != null ? _b : props == null ? void 0 : props.questionID) != null ? _d : (_c = props == null ? void 0 : props.request) == null ? void 0 : _c.id) != null ? _e : "").trim();
+    return jsonText((_e = (_d = (_b = (_a = props == null ? void 0 : props.id) != null ? _a : props == null ? void 0 : props.requestID) != null ? _b : props == null ? void 0 : props.questionID) != null ? _d : (_c = jsonObject(props.request)) == null ? void 0 : _c.id) != null ? _e : "").trim();
   }
   getPermissionRequestId(props) {
     var _a, _b, _c, _d, _e, _f;
-    return String((_f = (_e = (_c = (_b = (_a = props == null ? void 0 : props.requestID) != null ? _a : props == null ? void 0 : props.requestId) != null ? _b : props == null ? void 0 : props.permissionID) != null ? _c : props == null ? void 0 : props.id) != null ? _e : (_d = props == null ? void 0 : props.request) == null ? void 0 : _d.id) != null ? _f : "").trim();
+    return jsonText((_f = (_e = (_c = (_b = (_a = props == null ? void 0 : props.requestID) != null ? _a : props == null ? void 0 : props.requestId) != null ? _b : props == null ? void 0 : props.permissionID) != null ? _c : props == null ? void 0 : props.id) != null ? _e : (_d = jsonObject(props.request)) == null ? void 0 : _d.id) != null ? _f : "").trim();
   }
   buildQuestionAction(eventType, props) {
+    var _a;
     const requestId = this.getQuestionRequestId(props);
     if (!requestId)
       return null;
-    const questions = Array.isArray(props == null ? void 0 : props.questions) ? props.questions : [];
-    const first = questions.find((item) => item && typeof item === "object") || {};
-    const questionText = String(first.question || (props == null ? void 0 : props.question) || "OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9").trim();
-    const header = String(first.header || (props == null ? void 0 : props.header) || "Question").trim();
+    const questions = jsonArray(props.questions);
+    const first = (_a = questions.find(isJsonObject)) != null ? _a : {};
+    const questionText = jsonText(first.question || (props == null ? void 0 : props.question) || "OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9").trim();
+    const header = jsonText(first.header || (props == null ? void 0 : props.header) || "Question").trim();
     const custom = first.custom;
     const allowCustom = custom !== false;
-    const options = Array.isArray(first.options) ? first.options : [];
-    const actions = options.filter((option) => option && typeof option === "object" && String(option.label || "").trim()).map((option, idx) => {
-      const label = String(option.label || "").trim();
+    const options = jsonArray(first.options);
+    const actions = options.filter(isJsonObject).filter((option) => jsonText(option.label || "").trim()).map((option, idx) => {
+      const label = jsonText(option.label || "").trim();
       return {
         label,
-        description: String(option.description || "").trim() || void 0,
+        description: jsonText(option.description || "").trim() || void 0,
         reply: "question_answer",
         answers: [[label]],
         type: idx === 0 ? "primary" : "default"
@@ -1305,13 +1339,13 @@ var OpenCodeAdapter = class {
     if (options.length > 0) {
       detailLines.push("", "\u9009\u9879\uFF1A");
       options.forEach((option, idx) => {
-        if (!option || typeof option !== "object")
+        if (!isJsonObject(option))
           return;
-        const label = String(option.label || "").trim();
+        const label = jsonText(option.label || "").trim();
         if (!label)
           return;
         detailLines.push(`${idx + 1}. ${label}`);
-        const desc = String(option.description || "").trim();
+        const desc = jsonText(option.description || "").trim();
         if (desc)
           detailLines.push(`   ${desc}`);
       });
@@ -1323,7 +1357,7 @@ var OpenCodeAdapter = class {
       kind: "question",
       eventType,
       requestId,
-      sessionId: String((props == null ? void 0 : props.sessionID) || (props == null ? void 0 : props.sessionId) || this.sessionId || "").trim() || void 0,
+      sessionId: jsonText((props == null ? void 0 : props.sessionID) || (props == null ? void 0 : props.sessionId) || this.sessionId || "").trim() || void 0,
       summary: header ? `${header}: ${questionText}` : questionText,
       detail: detailLines.join("\n").trim(),
       question: questionText,
@@ -1338,22 +1372,23 @@ var OpenCodeAdapter = class {
     const requestId = this.getPermissionRequestId(props);
     if (!requestId)
       return null;
-    const permissionName = String((props == null ? void 0 : props.permission) || (props == null ? void 0 : props.type) || (props == null ? void 0 : props.name) || "permission").trim();
-    const title = String((props == null ? void 0 : props.title) || (props == null ? void 0 : props.action) || (props == null ? void 0 : props.summary) || "").trim();
+    const permissionName = jsonText((props == null ? void 0 : props.permission) || (props == null ? void 0 : props.type) || (props == null ? void 0 : props.name) || "permission").trim();
+    const title = jsonText((props == null ? void 0 : props.title) || (props == null ? void 0 : props.action) || (props == null ? void 0 : props.summary) || "").trim();
     const summary = title || `OpenCode \u8BF7\u6C42\u786E\u8BA4\uFF1A${permissionName}`;
-    const rawOptions = Array.isArray(props == null ? void 0 : props.options) ? props.options : [];
-    const optionActions = rawOptions.map((option, idx) => {
-      const label = typeof option === "string" ? option : String((option == null ? void 0 : option.label) || (option == null ? void 0 : option.value) || "").trim();
-      const reply = typeof option === "string" ? option : String((option == null ? void 0 : option.reply) || (option == null ? void 0 : option.value) || (option == null ? void 0 : option.label) || "").trim();
+    const rawOptions = jsonArray(props.options);
+    const optionActions = rawOptions.map((value, idx) => {
+      const option = jsonObject(value);
+      const label = typeof value === "string" ? value : jsonText((option == null ? void 0 : option.label) || (option == null ? void 0 : option.value) || "").trim();
+      const reply = typeof value === "string" ? value : jsonText((option == null ? void 0 : option.reply) || (option == null ? void 0 : option.value) || (option == null ? void 0 : option.label) || "").trim();
       if (!label || !reply)
         return null;
       return {
         label,
         reply,
-        message: typeof option === "object" ? String(option.message || "").trim() || void 0 : void 0,
+        message: jsonText((option == null ? void 0 : option.message) || "").trim() || void 0,
         type: idx === 0 ? "primary" : "default"
       };
-    }).filter(Boolean);
+    }).filter((option) => option !== null);
     const actions = optionActions.length > 0 ? optionActions : [
       { label: "\u5141\u8BB8\u4E00\u6B21", reply: "once", type: "primary" },
       { label: "\u603B\u662F\u5141\u8BB8", reply: "always", type: "success" },
@@ -1363,7 +1398,7 @@ var OpenCodeAdapter = class {
       kind: "permission",
       eventType,
       requestId,
-      sessionId: String((props == null ? void 0 : props.sessionID) || (props == null ? void 0 : props.sessionId) || this.sessionId || "").trim() || void 0,
+      sessionId: jsonText((props == null ? void 0 : props.sessionID) || (props == null ? void 0 : props.sessionId) || this.sessionId || "").trim() || void 0,
       summary,
       detail: [`OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9\uFF0C\u4EFB\u52A1\u4F1A\u5728\u56DE\u590D\u524D\u6682\u505C\u3002`, `\u8BF7\u6C42\uFF1A${permissionName}`].join("\n"),
       question: summary,
@@ -1380,35 +1415,39 @@ var OpenCodeAdapter = class {
       this.resolvePendingAction("question", requestId, "\u95EE\u9898\u5DF2\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54", true, props, eventType);
       return;
     }
-    const answers = Array.isArray(props == null ? void 0 : props.answers) ? props.answers : [];
-    const answerText = answers.map((group) => Array.isArray(group) ? group.join(", ") : String(group || "")).filter(Boolean).join("\uFF1B");
+    const answers = jsonArray(props.answers);
+    const answerText = answers.map((group) => Array.isArray(group) ? jsonArray(group).map(jsonText).join(", ") : jsonText(group)).filter(Boolean).join("\uFF1B");
     this.resolvePendingAction("question", requestId, `\u95EE\u9898\u5DF2\u56DE\u590D${answerText ? `\uFF1A${answerText}` : ""}`, false, props, eventType);
   }
   resolvePermissionFromEvent(eventType, props) {
     const requestId = this.getPermissionRequestId(props);
     if (!requestId)
       return;
-    const reply = String((props == null ? void 0 : props.reply) || (props == null ? void 0 : props.response) || "").trim();
+    const reply = jsonText((props == null ? void 0 : props.reply) || (props == null ? void 0 : props.response) || "").trim();
     this.resolvePendingAction("permission", requestId, `\u6743\u9650\u8BF7\u6C42\u5DF2\u56DE\u590D${reply ? `\uFF1A${reply}` : ""}`, reply === "reject", props, eventType);
   }
   /** 处理单个 SSE 事件 */
   handleSSEEvent(data) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K, _L, _M, _N, _O, _P, _Q, _R, _S, _T, _U, _V, _W, _X, _Y, _Z, __, _$, _aa, _ba, _ca, _da, _ea, _fa, _ga, _ha, _ia, _ja, _ka, _la, _ma, _na, _oa, _pa, _qa, _ra, _sa, _ta;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
     try {
-      const type = (_a = data == null ? void 0 : data.payload) == null ? void 0 : _a.type;
-      const props = ((_b = data == null ? void 0 : data.payload) == null ? void 0 : _b.properties) && typeof ((_c = data == null ? void 0 : data.payload) == null ? void 0 : _c.properties) === "object" ? data.payload.properties : {};
-      if (!type)
+      const event = jsonObject(data.payload);
+      const type = event == null ? void 0 : event.type;
+      if (typeof type !== "string" || !type)
         return;
+      const props = (_a = jsonObject(event == null ? void 0 : event.properties)) != null ? _a : {};
+      const part = jsonObject(props.part);
+      const messageInfo = jsonObject(props.info);
+      const message = jsonObject(props.message);
+      const status = jsonObject(props.status);
       if (this.stopStreaming)
         return;
       if (type === "server.connected")
         return;
-      const sid = (props == null ? void 0 : props.sessionID) || (props == null ? void 0 : props.sessionId) || ((_d = props == null ? void 0 : props.part) == null ? void 0 : _d.sessionID) || ((_e = props == null ? void 0 : props.part) == null ? void 0 : _e.sessionId) || ((_f = props == null ? void 0 : props.info) == null ? void 0 : _f.sessionID) || ((_g = props == null ? void 0 : props.info) == null ? void 0 : _g.sessionId) || (props == null ? void 0 : props.sessionID) || ((_h = props == null ? void 0 : props.message) == null ? void 0 : _h.sessionID) || ((_i = props == null ? void 0 : props.message) == null ? void 0 : _i.sessionId) || ((_j = props == null ? void 0 : props.status) == null ? void 0 : _j.sessionID);
+      const sid = (props == null ? void 0 : props.sessionID) || (props == null ? void 0 : props.sessionId) || (part == null ? void 0 : part.sessionID) || (part == null ? void 0 : part.sessionId) || (messageInfo == null ? void 0 : messageInfo.sessionID) || (messageInfo == null ? void 0 : messageInfo.sessionId) || (message == null ? void 0 : message.sessionID) || (message == null ? void 0 : message.sessionId) || (status == null ? void 0 : status.sessionID);
       if (sid && sid !== this.sessionId)
         return;
       if (!this.waitingForReply && type !== "message.updated")
         return;
-      console.log(`[OpenCode] SSE \u4E8B\u4EF6: ${type}`);
       const markIdleFinish = () => {
         if (!this.waitingForReply)
           return;
@@ -1427,7 +1466,7 @@ var OpenCodeAdapter = class {
       };
       const touchActivity = () => {
         this.lastSseActivityAt = Date.now();
-        const armFn = this._armSilenceCheck;
+        const armFn = this.armSilenceCheck;
         if (typeof armFn === "function" && this.waitingForReply)
           armFn();
       };
@@ -1453,18 +1492,19 @@ var OpenCodeAdapter = class {
         return;
       }
       if (type === "message.updated") {
-        const info = props.info;
+        const info = messageInfo;
         if ((info == null ? void 0 : info.role) === "assistant") {
-          this.lastAssistantMsgId = info.id;
+          if (typeof info.id === "string")
+            this.lastAssistantMsgId = info.id;
           if (info.error && !this.errorSent) {
             this.errorSent = true;
-            const errMsg = ((_k = info.error.data) == null ? void 0 : _k.message) || info.error.name || "\u672A\u77E5\u9519\u8BEF";
+            const errMsg = openCodeErrorText(info.error, "\u672A\u77E5\u9519\u8BEF");
             console.error(`[OpenCode] assistant \u9519\u8BEF: ${errMsg}`);
             this.pushMessage({ type: "error", message: errMsg });
           }
         }
       } else if (type === "message.part.delta") {
-        const field = String((_l = props == null ? void 0 : props.field) != null ? _l : "").toLowerCase();
+        const field = jsonText((_b = props == null ? void 0 : props.field) != null ? _b : "").toLowerCase();
         const delta = props == null ? void 0 : props.delta;
         if (field !== "text" || typeof delta !== "string" || !delta)
           return;
@@ -1472,19 +1512,18 @@ var OpenCodeAdapter = class {
         const messageId = props == null ? void 0 : props.messageID;
         if (this.lastAssistantMsgId && messageId && messageId !== this.lastAssistantMsgId)
           return;
-        const partId = String((_n = (_m = props == null ? void 0 : props.partID) != null ? _m : props == null ? void 0 : props.partId) != null ? _n : "").trim();
+        const partId = jsonText((_d = (_c = props == null ? void 0 : props.partID) != null ? _c : props == null ? void 0 : props.partId) != null ? _d : "").trim();
         if (partId) {
           const prevText = this.lastPartTexts.get(partId) || "";
           this.lastPartTexts.set(partId, prevText + delta);
         }
         this.appendLiveAssistantText(delta);
       } else if (type === "message.part.updated" || type === "message.part.created") {
-        const part = props.part;
         if (!part)
           return;
         touchActivity();
-        const partType = (part.type || "").toString().toLowerCase();
-        if (partType === "text" && typeof part.text === "string") {
+        const partType = jsonText(part.type || "").toLowerCase();
+        if (partType === "text" && typeof part.text === "string" && typeof part.id === "string") {
           if (!this.lastAssistantMsgId)
             return;
           if (part.messageID !== this.lastAssistantMsgId)
@@ -1499,44 +1538,48 @@ var OpenCodeAdapter = class {
             this.appendLiveAssistantText(part.text);
           }
         } else if (partType === "tool" || partType.includes("tool")) {
-          const toolName = String((_q = (_p = (_o = part.tool) != null ? _o : part.toolName) != null ? _p : part.name) != null ? _q : "").trim();
-          const toolId = String((_t = (_s = (_r = part.callID) != null ? _r : part.callId) != null ? _s : part.id) != null ? _t : toolName).trim();
+          const toolName = jsonText((_g = (_f = (_e = part.tool) != null ? _e : part.toolName) != null ? _f : part.name) != null ? _g : "").trim();
+          const toolId = jsonText((_j = (_i = (_h = part.callID) != null ? _h : part.callId) != null ? _i : part.id) != null ? _j : toolName).trim();
+          const state = jsonObject(part.state);
+          const stateRequest = jsonObject(state == null ? void 0 : state.request);
+          const partRequest = jsonObject(part.request);
+          const partCall = jsonObject(part.call);
           const toolArgs = firstMeaningfulToolPayload(
-            (_u = part.state) == null ? void 0 : _u.input,
-            (_v = part.state) == null ? void 0 : _v.args,
-            (_w = part.state) == null ? void 0 : _w.arguments,
-            (_x = part.state) == null ? void 0 : _x.params,
-            (_y = part.state) == null ? void 0 : _y.parameters,
-            (_A = (_z = part.state) == null ? void 0 : _z.request) == null ? void 0 : _A.input,
-            (_C = (_B = part.state) == null ? void 0 : _B.request) == null ? void 0 : _C.args,
-            (_E = (_D = part.state) == null ? void 0 : _D.request) == null ? void 0 : _E.arguments,
-            (_F = part.request) == null ? void 0 : _F.input,
-            (_G = part.request) == null ? void 0 : _G.args,
-            (_H = part.request) == null ? void 0 : _H.arguments,
+            state == null ? void 0 : state.input,
+            state == null ? void 0 : state.args,
+            state == null ? void 0 : state.arguments,
+            state == null ? void 0 : state.params,
+            state == null ? void 0 : state.parameters,
+            stateRequest == null ? void 0 : stateRequest.input,
+            stateRequest == null ? void 0 : stateRequest.args,
+            stateRequest == null ? void 0 : stateRequest.arguments,
+            partRequest == null ? void 0 : partRequest.input,
+            partRequest == null ? void 0 : partRequest.args,
+            partRequest == null ? void 0 : partRequest.arguments,
             part.args,
             part.arguments,
             part.input,
             part.params,
             part.parameters,
-            (_I = part.call) == null ? void 0 : _I.input,
-            (_J = part.call) == null ? void 0 : _J.args,
-            (_K = part.call) == null ? void 0 : _K.arguments
+            partCall == null ? void 0 : partCall.input,
+            partCall == null ? void 0 : partCall.args,
+            partCall == null ? void 0 : partCall.arguments
           );
-          const rawStatus = String(
-            (_N = (_M = (_L = part.state) == null ? void 0 : _L.status) != null ? _M : part.status) != null ? _N : ""
+          const rawStatus = jsonText(
+            (_l = (_k = state == null ? void 0 : state.status) != null ? _k : part.status) != null ? _l : ""
           ).toLowerCase();
           const toolStatus = rawStatus === "completed" || rawStatus === "error" || rawStatus === "done" || rawStatus === "failed" || rawStatus === "cancelled" || rawStatus === "aborted" ? "done" : "running";
           if (toolName.toLowerCase() === "question" && toolStatus === "running")
             return;
           const outputCandidate = toolStatus === "done" ? firstMeaningfulToolPayload(
-            (_O = part.state) == null ? void 0 : _O.output,
-            (_P = part.state) == null ? void 0 : _P.result,
-            (_Q = part.state) == null ? void 0 : _Q.response,
+            state == null ? void 0 : state.output,
+            state == null ? void 0 : state.result,
+            state == null ? void 0 : state.response,
             part.output,
             part.result,
             part.response,
             part.error,
-            (_R = part.state) == null ? void 0 : _R.error
+            state == null ? void 0 : state.error
           ) : void 0;
           const toolOutput = formatToolDisplayText(outputCandidate) || void 0;
           if (toolName || toolId) {
@@ -1554,9 +1597,11 @@ var OpenCodeAdapter = class {
           }
         }
       } else if (type.toLowerCase().includes("tool")) {
-        const info = (_V = (_U = (_T = (_S = props == null ? void 0 : props.info) != null ? _S : props == null ? void 0 : props.tool) != null ? _T : props == null ? void 0 : props.call) != null ? _U : props) != null ? _V : {};
-        const toolName = String(
-          (_ba = (_aa = (__ = (_Y = (_X = (_W = info.toolName) != null ? _W : info.name) != null ? _X : info.label) != null ? _Y : info.title) != null ? __ : (_Z = info.tool) == null ? void 0 : _Z.name) != null ? _aa : (_$ = info.function) == null ? void 0 : _$.name) != null ? _ba : ""
+        const info = (_o = jsonObject((_n = (_m = props.info) != null ? _m : props.tool) != null ? _n : props.call)) != null ? _o : props;
+        const request2 = jsonObject(info.request);
+        const call = jsonObject(info.call);
+        const toolName = jsonText(
+          (_w = (_v = (_t = (_r = (_q = (_p = info.toolName) != null ? _p : info.name) != null ? _q : info.label) != null ? _r : info.title) != null ? _t : (_s = jsonObject(info.tool)) == null ? void 0 : _s.name) != null ? _v : (_u = jsonObject(info.function)) == null ? void 0 : _u.name) != null ? _w : ""
         ).trim();
         const toolArgs = firstMeaningfulToolPayload(
           info.args,
@@ -1564,32 +1609,32 @@ var OpenCodeAdapter = class {
           info.input,
           info.params,
           info.parameters,
-          (_ca = info.request) == null ? void 0 : _ca.args,
-          (_da = info.request) == null ? void 0 : _da.arguments,
-          (_ea = info.request) == null ? void 0 : _ea.input,
-          (_fa = info.request) == null ? void 0 : _fa.params,
-          (_ga = info.call) == null ? void 0 : _ga.args,
-          (_ha = info.call) == null ? void 0 : _ha.arguments,
-          (_ia = info.call) == null ? void 0 : _ia.input,
+          request2 == null ? void 0 : request2.args,
+          request2 == null ? void 0 : request2.arguments,
+          request2 == null ? void 0 : request2.input,
+          request2 == null ? void 0 : request2.params,
+          call == null ? void 0 : call.args,
+          call == null ? void 0 : call.arguments,
+          call == null ? void 0 : call.input,
           props == null ? void 0 : props.args,
           props == null ? void 0 : props.arguments,
           props == null ? void 0 : props.input,
           props == null ? void 0 : props.params,
           props == null ? void 0 : props.parameters
         );
-        const toolId = String(
-          (_ma = (_la = (_ka = (_ja = info.id) != null ? _ja : info.toolCallID) != null ? _ka : info.toolCallId) != null ? _la : toolName) != null ? _ma : type
+        const toolId = jsonText(
+          (_A = (_z = (_y = (_x = info.id) != null ? _x : info.toolCallID) != null ? _y : info.toolCallId) != null ? _z : toolName) != null ? _A : type
         ).trim();
-        const rawStatus = String(
-          (_qa = (_pa = (_oa = info.status) != null ? _oa : (_na = info.state) == null ? void 0 : _na.type) != null ? _pa : props == null ? void 0 : props.status) != null ? _qa : ""
+        const rawStatus = jsonText(
+          (_E = (_D = (_C = info.status) != null ? _C : (_B = jsonObject(info.state)) == null ? void 0 : _B.type) != null ? _D : props == null ? void 0 : props.status) != null ? _E : ""
         ).toLowerCase();
         const toolStatus = rawStatus === "done" || rawStatus === "completed" || rawStatus === "success" || rawStatus === "succeeded" || rawStatus === "finished" || rawStatus === "error" || rawStatus === "failed" || rawStatus === "cancelled" || rawStatus === "aborted" ? "done" : "running";
         if (toolName.toLowerCase() === "question" && toolStatus === "running")
           return;
         const outputCandidate = firstMeaningfulToolPayload(
-          (_ra = info.output) == null ? void 0 : _ra.text,
+          (_F = jsonObject(info.output)) == null ? void 0 : _F.text,
           info.output,
-          (_sa = info.result) == null ? void 0 : _sa.text,
+          (_G = jsonObject(info.result)) == null ? void 0 : _G.text,
           info.result,
           info.response,
           info.content,
@@ -1613,7 +1658,7 @@ var OpenCodeAdapter = class {
         const error = props.error;
         if (error && !this.errorSent) {
           this.errorSent = true;
-          const errMsg = ((_ta = error.data) == null ? void 0 : _ta.message) || error.message || error.name || "\u672A\u77E5\u9519\u8BEF";
+          const errMsg = openCodeErrorText(error, "\u672A\u77E5\u9519\u8BEF");
           console.error(`[OpenCode] session \u9519\u8BEF: ${errMsg}`);
           this.pushMessage({ type: "error", message: errMsg });
         }
@@ -1621,7 +1666,6 @@ var OpenCodeAdapter = class {
         touchActivity();
         markIdleFinish();
       } else if (type === "session.status") {
-        const status = props.status;
         if ((status == null ? void 0 : status.type) === "busy") {
           touchActivity();
           if (this.idleDebounceTimer) {
@@ -1647,6 +1691,7 @@ var OpenCodeAdapter = class {
     this.liveAssistantText = "";
     this.publishedFinalAnswer = "";
     this.currentTurnToken = "";
+    this.armSilenceCheck = null;
     this.pendingMessages = [];
     this.pendingResolve = null;
     if (this.idleDebounceTimer) {
@@ -1675,7 +1720,7 @@ var OpenCodeAdapter = class {
     }
     if (currentSessionId) {
       void this.httpRequest("POST", `/session/${currentSessionId}/abort`).catch((e) => {
-        console.warn(`[OpenCode] abort session \u5931\u8D25: ${(e == null ? void 0 : e.message) || e}`);
+        console.warn(`[OpenCode] abort session \u5931\u8D25: ${openCodeErrorText(e, String(e))}`);
       });
     }
     this.pushMessage({ type: "task_finish" });
@@ -1692,14 +1737,11 @@ var OpenCodeAdapter = class {
   }
   parseSSEPayload(frame) {
     const payload = frame.split("\n").map((line) => line.replace(/\r$/, "")).filter((line) => line.startsWith("data:")).map((line) => line.replace(/^data:\s?/, "")).join("\n").trim();
-    if (!payload)
-      return null;
-    return JSON.parse(payload);
+    return payload ? jsonObject(JSON.parse(payload)) : void 0;
   }
   httpRequest(method, urlPath, body, options) {
     return new Promise((resolve, reject) => {
       var _a, _b;
-      const http = require("http");
       const url = new URL(urlPath, this.baseUrl);
       const postData = body ? JSON.stringify(body) : "";
       const headers = {};
@@ -1718,8 +1760,9 @@ var OpenCodeAdapter = class {
         timeout: (_a = options == null ? void 0 : options.timeoutMs) != null ? _a : 3e4
       }, (res) => {
         let data = "";
+        res.setEncoding("utf8");
         res.on("data", (chunk) => {
-          data += chunk.toString();
+          data += chunk;
         });
         res.on("end", () => {
           var _a2;
@@ -1734,11 +1777,10 @@ var OpenCodeAdapter = class {
           } else {
             let errMsg = `HTTP ${res.statusCode}`;
             try {
-              const errBody = JSON.parse(data);
-              if ((_a2 = errBody == null ? void 0 : errBody.error) == null ? void 0 : _a2.message) {
-                errMsg = errBody.error.message;
-              } else if (errBody == null ? void 0 : errBody.message) {
-                errMsg = errBody.message;
+              const errBody = jsonObject(JSON.parse(data));
+              const message = ((_a2 = jsonObject(errBody == null ? void 0 : errBody.error)) == null ? void 0 : _a2.message) || (errBody == null ? void 0 : errBody.message);
+              if (typeof message === "string" && message) {
+                errMsg = message;
               } else {
                 errMsg += `: ${data.substring(0, 200)}`;
               }
@@ -1771,9 +1813,10 @@ var OpenCodeAdapter = class {
   }
   /** 检查 opencode 服务器健康状态 */
   async checkHealth() {
+    var _a;
     try {
       const result = await this.httpRequest("GET", "/global/health");
-      return (result == null ? void 0 : result.healthy) === true;
+      return ((_a = jsonObject(result)) == null ? void 0 : _a.healthy) === true;
     } catch (e) {
       return false;
     }
@@ -1800,18 +1843,11 @@ var OpenCodeAdapter = class {
         this.process = spawnOpenCode(this.settings.opencodePath, { type: "serve", port }, {
           cwd
         });
-        (_a = this.process.stdout) == null ? void 0 : _a.on("data", (data) => {
-          console.log("[OpenCode stdout]:", data.toString().trim());
-        });
-        (_b = this.process.stderr) == null ? void 0 : _b.on("data", (data) => {
-          console.log("[OpenCode stderr]:", data.toString().trim());
-        });
+        (_a = this.process.stdout) == null ? void 0 : _a.resume();
+        (_b = this.process.stderr) == null ? void 0 : _b.resume();
         this.process.on("error", (err) => {
           console.error("[OpenCode] \u8FDB\u7A0B\u542F\u52A8\u5931\u8D25:", err.message);
           resolve(false);
-        });
-        this.process.on("exit", (code) => {
-          console.log(`[OpenCode] \u8FDB\u7A0B\u9000\u51FA, code=${code}`);
         });
         this.process.on("spawn", () => resolve(true));
         setTimeout(() => resolve(true), 2e3);
@@ -1848,34 +1884,34 @@ var ChatSessionRenderer = class {
     this.renderProgress();
     this.progressTimer = window.setInterval(() => this.renderProgress(), 1e3);
   }
-  renderActionRequest(request) {
-    const key = this.actionKey(request.kind, request.requestId);
+  renderActionRequest(request2) {
+    const key = this.actionKey(request2.kind, request2.requestId);
     if (this.actionCardMap.has(key))
       return;
     this.touch();
-    const cardEl = this.contentEl.createDiv({ cls: `iflow-action-request ${request.kind}` });
+    const cardEl = this.contentEl.createDiv({ cls: `iflow-action-request ${request2.kind}` });
     const headerEl = cardEl.createDiv({ cls: "iflow-action-request-header" });
     const topRowEl = headerEl.createDiv({ cls: "iflow-action-request-top" });
     const iconEl = topRowEl.createSpan({ cls: "iflow-action-request-icon" });
-    (0, import_obsidian.setIcon)(iconEl, request.kind === "question" ? "circle-help" : "shield-alert");
-    topRowEl.createSpan({ cls: "iflow-action-request-title", text: request.summary || "OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9" });
+    (0, import_obsidian.setIcon)(iconEl, request2.kind === "question" ? "circle-help" : "shield-alert");
+    topRowEl.createSpan({ cls: "iflow-action-request-title", text: request2.summary || "OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9" });
     const statusEl = headerEl.createDiv({ cls: "iflow-action-request-status", text: "\u7B49\u5F85\u9009\u62E9" });
     const buttons = [];
-    if (request.kind === "question" && this.questionItems(request).length > 0) {
-      this.renderQuestionSelector(cardEl, request, key, buttons);
+    if (request2.kind === "question" && this.questionItems(request2).length > 0) {
+      this.renderQuestionSelector(cardEl, request2, key, buttons);
     } else {
-      if (request.detail) {
-        cardEl.createEl("pre", { cls: "iflow-action-request-detail", text: request.detail });
+      if (request2.detail) {
+        cardEl.createEl("pre", { cls: "iflow-action-request-detail", text: request2.detail });
       }
       const actionsEl = cardEl.createDiv({ cls: "iflow-action-request-actions" });
-      this.renderActionButtons(actionsEl, request, key, buttons);
+      this.renderActionButtons(actionsEl, request2, key, buttons);
     }
     this.actionCardMap.set(key, { cardEl, statusEl, buttons, resolved: false });
     this.streamEl.setText("OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u56DE\u590D\uFF0C\u4EFB\u52A1\u4F1A\u5728\u56DE\u590D\u540E\u7EE7\u7EED\u3002");
     this.scrollToBottom();
   }
-  renderActionButtons(actionsEl, request, key, buttons) {
-    for (const action of request.actions || []) {
+  renderActionButtons(actionsEl, request2, key, buttons) {
+    for (const action of request2.actions || []) {
       const button = actionsEl.createEl("button", { text: action.label || "\u9009\u62E9" });
       button.addClass("iflow-action-btn");
       button.addClass(`iflow-action-btn-${action.type || "default"}`);
@@ -1889,11 +1925,11 @@ var ChatSessionRenderer = class {
           return;
         try {
           if (action.custom) {
-            await ((_a = this.onAction) == null ? void 0 : _a.call(this, request, action));
+            await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, action));
             return;
           }
           this.setActionButtonsBusy(key, action.label || "\u5904\u7406\u4E2D...");
-          await ((_b = this.onAction) == null ? void 0 : _b.call(this, request, action));
+          await ((_b = this.onAction) == null ? void 0 : _b.call(this, request2, action));
         } catch (e) {
           new import_obsidian.Notice((e == null ? void 0 : e.message) || "\u5904\u7406\u9009\u62E9\u5931\u8D25");
           this.setActionButtonsEnabled(key);
@@ -1902,8 +1938,8 @@ var ChatSessionRenderer = class {
       buttons.push(button);
     }
   }
-  renderQuestionSelector(cardEl, request, key, buttons) {
-    const questions = this.questionItems(request);
+  renderQuestionSelector(cardEl, request2, key, buttons) {
+    const questions = this.questionItems(request2);
     const answers = questions.map(() => []);
     const customValues = questions.map(() => "");
     questions.forEach((question, questionIndex) => {
@@ -1911,7 +1947,7 @@ var ChatSessionRenderer = class {
       if (questions.length > 1) {
         blockEl.createDiv({ cls: "iflow-question-progress", text: `\u95EE\u9898 ${questionIndex + 1}/${questions.length}` });
       }
-      blockEl.createDiv({ cls: "iflow-question-text", text: String(question.question || request.question || "OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9") });
+      blockEl.createDiv({ cls: "iflow-question-text", text: jsonText(question.question || request2.question || "OpenCode \u6B63\u5728\u7B49\u5F85\u4F60\u7684\u9009\u62E9") });
       blockEl.createDiv({
         cls: "iflow-question-hint",
         text: question.multiple === true ? "\u53EF\u9009\u62E9\u591A\u4E2A\u9009\u9879\uFF0C\u4E5F\u53EF\u4EE5\u586B\u5199\u81EA\u5B9A\u4E49\u56DE\u7B54\u3002" : "\u9009\u62E9\u4E00\u4E2A\u9009\u9879\uFF0C\u6216\u586B\u5199\u81EA\u5B9A\u4E49\u56DE\u7B54\u3002"
@@ -1925,9 +1961,9 @@ var ChatSessionRenderer = class {
         });
       };
       const optionsEl = blockEl.createDiv({ cls: "iflow-question-options" });
-      const options = Array.isArray(question.options) ? question.options : [];
+      const options = jsonArray(question.options).filter(isJsonObject);
       for (const option of options) {
-        const label = String((option == null ? void 0 : option.label) || "").trim();
+        const label = jsonText((option == null ? void 0 : option.label) || "").trim();
         if (!label)
           continue;
         const button = optionsEl.createEl("button");
@@ -1939,7 +1975,7 @@ var ChatSessionRenderer = class {
         button.createSpan({ cls: "iflow-question-option-mark" });
         const mainEl = button.createSpan({ cls: "iflow-question-option-main" });
         mainEl.createSpan({ cls: "iflow-question-option-label", text: label });
-        const desc = String((option == null ? void 0 : option.description) || "").trim();
+        const desc = jsonText((option == null ? void 0 : option.description) || "").trim();
         if (desc)
           mainEl.createSpan({ cls: "iflow-question-option-desc", text: desc });
         button.addEventListener("click", (event) => {
@@ -1997,7 +2033,7 @@ var ChatSessionRenderer = class {
         return;
       try {
         this.setActionButtonsBusy(key, "\u53D6\u6D88\u4E2D...");
-        await ((_a = this.onAction) == null ? void 0 : _a.call(this, request, { label: "\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54", reply: "question_reject", type: "danger" }));
+        await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, { label: "\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54", reply: "question_reject", type: "danger" }));
       } catch (e) {
         new import_obsidian.Notice((e == null ? void 0 : e.message) || "\u53D6\u6D88\u5931\u8D25");
         this.setActionButtonsEnabled(key);
@@ -2019,7 +2055,7 @@ var ChatSessionRenderer = class {
       }
       try {
         this.setActionButtonsBusy(key, "\u63D0\u4EA4\u4E2D...");
-        await ((_a = this.onAction) == null ? void 0 : _a.call(this, request, {
+        await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, {
           label: "\u63D0\u4EA4\u56DE\u7B54",
           reply: "question_answer",
           answers: normalized,
@@ -2032,10 +2068,9 @@ var ChatSessionRenderer = class {
     });
     buttons.push(submitButton);
   }
-  questionItems(request) {
+  questionItems(request2) {
     var _a;
-    const questions = (_a = request.data) == null ? void 0 : _a.questions;
-    return Array.isArray(questions) ? questions.filter((item) => item && typeof item === "object") : [];
+    return jsonArray((_a = request2.data) == null ? void 0 : _a.questions).filter(isJsonObject);
   }
   resolveActionRequest(resolved) {
     const key = this.actionKey(resolved.kind, resolved.requestId);
@@ -2500,8 +2535,8 @@ function verifyAutomationLicense(code, publicKey = issuerPublicKey) {
 var net2 = __toESM(require("net"));
 var tls = __toESM(require("tls"));
 var path2 = __toESM(require("path"));
-var SkillsPaths = require_skills_paths();
-var WeightedSearch = require_weighted_search();
+var SkillsPaths = __toESM(require_skills_paths());
+var WeightedSearch = __toESM(require_weighted_search());
 var DEFAULT_SETTINGS = {
   cliBackend: "opencode",
   autoStartProcess: true,
@@ -2647,10 +2682,10 @@ function getModelsForBackend(backend, currentModel) {
   }
   return models;
 }
-function parseTemplatePaths(value) {
+function parseTemplatePaths2(value) {
   return SkillsPaths.parseTemplatePaths(value);
 }
-function isLikelyWindowsAbsolutePath(value) {
+function isLikelyWindowsAbsolutePath2(value) {
   return SkillsPaths.isLikelyWindowsAbsolutePath(value);
 }
 function isLikelyFileUrl(value) {
@@ -2809,12 +2844,12 @@ function extractAbsolutePathsFromDataTransfer(app, dataTransfer) {
   tryPush(dataTransfer.getData("application/x-obsidian-file"));
   for (const rawCandidate of candidates.flatMap((v) => v.split(/\r?\n/)).map((v) => v.trim()).filter(Boolean)) {
     const fileUrlAbs = tryParseFileUrlToAbsolutePath(rawCandidate);
-    if (fileUrlAbs && isLikelyWindowsAbsolutePath(fileUrlAbs)) {
+    if (fileUrlAbs && isLikelyWindowsAbsolutePath2(fileUrlAbs)) {
       add(fileUrlAbs);
       continue;
     }
     const direct = stripQuotes(rawCandidate);
-    if (isLikelyWindowsAbsolutePath(direct)) {
+    if (isLikelyWindowsAbsolutePath2(direct)) {
       add(direct);
       continue;
     }
@@ -2854,11 +2889,11 @@ function extractAbsolutePathsFromDataTransfer(app, dataTransfer) {
         continue;
       }
       const fromMdFileUrl = tryParseFileUrlToAbsolutePath(mdTarget);
-      if (fromMdFileUrl && isLikelyWindowsAbsolutePath(fromMdFileUrl)) {
+      if (fromMdFileUrl && isLikelyWindowsAbsolutePath2(fromMdFileUrl)) {
         add(fromMdFileUrl);
         continue;
       }
-      if (isLikelyWindowsAbsolutePath(mdTarget)) {
+      if (isLikelyWindowsAbsolutePath2(mdTarget)) {
         add(mdTarget);
         continue;
       }
@@ -4077,9 +4112,9 @@ ${m.content}
     this.pendingActionRequest = null;
     this.inputTextArea.placeholder = "\u8F93\u5165\u95EE\u9898... (Enter \u53D1\u9001, Shift+Enter \u6362\u884C, / \u547D\u4EE4, @ \u6587\u4EF6, # \u6A21\u677F)";
   }
-  async handleRuntimeAction(request, action) {
+  async handleRuntimeAction(request2, action) {
     var _a;
-    this.setPendingActionRequest(request);
+    this.setPendingActionRequest(request2);
     const adapter = this.plugin.adapter;
     if (action.custom) {
       this.inputTextArea.focus();
@@ -4088,36 +4123,36 @@ ${m.content}
     }
     let ok = false;
     let summary = "";
-    if (request.kind === "question") {
+    if (request2.kind === "question") {
       if (action.reply === "question_reject") {
         if (typeof (adapter == null ? void 0 : adapter.rejectQuestion) !== "function")
           throw new Error("\u5F53\u524D OpenCode \u9002\u914D\u5668\u4E0D\u652F\u6301\u53D6\u6D88 question");
-        ok = await adapter.rejectQuestion(request.requestId);
+        ok = await adapter.rejectQuestion(request2.requestId);
         summary = "\u5DF2\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54";
       } else {
         if (typeof (adapter == null ? void 0 : adapter.replyQuestion) !== "function")
           throw new Error("\u5F53\u524D OpenCode \u9002\u914D\u5668\u4E0D\u652F\u6301\u56DE\u590D question");
         const answers = action.answers && action.answers.length > 0 ? action.answers : [[action.label]];
-        ok = await adapter.replyQuestion(request.requestId, answers);
+        ok = await adapter.replyQuestion(request2.requestId, answers);
         summary = `\u5DF2\u56DE\u590D\uFF1A${answers.map((group) => group.join(", ")).join("\uFF1B")}`;
       }
-    } else if (request.kind === "permission") {
+    } else if (request2.kind === "permission") {
       if (typeof (adapter == null ? void 0 : adapter.replyPermission) !== "function")
         throw new Error("\u5F53\u524D OpenCode \u9002\u914D\u5668\u4E0D\u652F\u6301\u56DE\u590D permission");
       const reply = action.reply || action.label;
-      ok = await adapter.replyPermission(request.requestId, reply, action.message);
+      ok = await adapter.replyPermission(request2.requestId, reply, action.message);
       summary = `\u5DF2\u9009\u62E9\uFF1A${reply}`;
     }
     if (!ok)
       throw new Error("\u56DE\u590D OpenCode \u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5");
     (_a = this.activeSessionRenderer) == null ? void 0 : _a.resolveActionRequest({
-      kind: request.kind,
-      eventType: `${request.kind}.local_reply`,
-      requestId: request.requestId,
+      kind: request2.kind,
+      eventType: `${request2.kind}.local_reply`,
+      requestId: request2.requestId,
       summary,
       rejected: action.reply === "question_reject" || action.reply === "reject"
     });
-    this.clearPendingActionRequest(request);
+    this.clearPendingActionRequest(request2);
   }
   async replyPendingQuestionFromText(answer) {
     var _a, _b;
@@ -4134,7 +4169,7 @@ ${m.content}
     }
     this.appendMessage("user", cleaned);
     this.inputTextArea.value = "";
-    const questionCount = Array.isArray((_a = pending.data) == null ? void 0 : _a.questions) && pending.data.questions.length > 0 ? pending.data.questions.length : 1;
+    const questionCount = jsonArray((_a = pending.data) == null ? void 0 : _a.questions).length || 1;
     const answers = Array.from({ length: questionCount }, (_, index) => index === 0 ? [cleaned] : []);
     const ok = await adapter.replyQuestion(pending.requestId, answers);
     if (!ok) {
@@ -4306,7 +4341,7 @@ ${fullPrompt}`;
       contentEl,
       copyBtn,
       onRenderMarkdown: (renderedContentEl) => this.attachInternalLinkHandler(renderedContentEl),
-      onAction: (request, action) => this.handleRuntimeAction(request, action)
+      onAction: (request2, action) => this.handleRuntimeAction(request2, action)
     });
     this.activeSessionRenderer = sessionRenderer;
     this.isGenerating = true;
@@ -4625,21 +4660,21 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     if (typeof this.settings.scheduledTaskAutoApprove !== "boolean") {
       this.settings.scheduledTaskAutoApprove = DEFAULT_SETTINGS.scheduledTaskAutoApprove;
     }
-    const migrated = parseTemplatePaths(this.settings.templatePaths);
+    const migrated = parseTemplatePaths2(this.settings.templatePaths);
     if (migrated.length === 0 && typeof this.settings.templatePath === "string" && this.settings.templatePath.trim()) {
-      this.settings.templatePaths = parseTemplatePaths(this.settings.templatePath);
+      this.settings.templatePaths = parseTemplatePaths2(this.settings.templatePath);
     } else {
       this.settings.templatePaths = migrated;
     }
     if (!Array.isArray(this.settings.skillsPaths)) {
       this.settings.skillsPaths = DEFAULT_SETTINGS.skillsPaths;
     } else {
-      this.settings.skillsPaths = parseTemplatePaths(this.settings.skillsPaths);
+      this.settings.skillsPaths = parseTemplatePaths2(this.settings.skillsPaths);
     }
     if (!Array.isArray(this.settings.lskillPaths)) {
       this.settings.lskillPaths = DEFAULT_SETTINGS.lskillPaths;
     } else {
-      this.settings.lskillPaths = parseTemplatePaths(this.settings.lskillPaths);
+      this.settings.lskillPaths = parseTemplatePaths2(this.settings.lskillPaths);
     }
     if (typeof this.settings.obsidianCliEnabled !== "boolean") {
       this.settings.obsidianCliEnabled = DEFAULT_SETTINGS.obsidianCliEnabled;
@@ -4666,14 +4701,14 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     }
   }
   async saveSettings() {
-    this.settings.templatePaths = parseTemplatePaths(this.settings.templatePaths);
+    this.settings.templatePaths = parseTemplatePaths2(this.settings.templatePaths);
     if (this.settings.templatePaths.length > 0) {
       this.settings.templatePath = this.settings.templatePaths[0];
     } else {
       delete this.settings.templatePath;
     }
-    this.settings.skillsPaths = parseTemplatePaths(this.settings.skillsPaths);
-    this.settings.lskillPaths = parseTemplatePaths(this.settings.lskillPaths);
+    this.settings.skillsPaths = parseTemplatePaths2(this.settings.skillsPaths);
+    this.settings.lskillPaths = parseTemplatePaths2(this.settings.lskillPaths);
     if (typeof this.settings.obsidianCliEnabled !== "boolean") {
       this.settings.obsidianCliEnabled = DEFAULT_SETTINGS.obsidianCliEnabled;
     }
@@ -4700,15 +4735,15 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     await this.saveData(this.settings);
   }
   getTemplateFolderPaths() {
-    const paths = parseTemplatePaths(this.settings.templatePaths);
+    const paths = parseTemplatePaths2(this.settings.templatePaths);
     if (paths.length > 0)
       return paths;
-    const fallback = parseTemplatePaths(this.settings.templatePath);
+    const fallback = parseTemplatePaths2(this.settings.templatePath);
     return fallback.length > 0 ? fallback : DEFAULT_SETTINGS.templatePaths;
   }
   getSkillsFolderPaths() {
     const internalSkill = this.settings.obsidianCliEnabled ? this.getInternalObsidianCliSkillPath() : "";
-    const paths = parseTemplatePaths([
+    const paths = parseTemplatePaths2([
       ...this.settings.skillsPaths || [],
       ...this.settings.lskillPaths || [],
       internalSkill
@@ -5154,37 +5189,37 @@ ${errorMsg}`);
    * 权限请求优先选择 always（本次会话后续同类请求也自动放行）；普通问题优先采用
    * OpenCode 给出的第一个非拒绝选项。没有选项时，把决策权明确交还给当前 AI 继续判断。
    */
-  async resolveScheduledTaskAction(request) {
+  async resolveScheduledTaskAction(request2) {
     var _a, _b, _c;
     this.requireAutomationLicense();
     if (!this.adapter)
       throw new Error("OpenCode \u672A\u8FDE\u63A5\uFF0C\u65E0\u6CD5\u5904\u7406\u540E\u53F0\u4EA4\u4E92");
-    if (request.kind === "permission") {
-      const allowed = (request.actions || []).filter((action) => {
+    if (request2.kind === "permission") {
+      const allowed = (request2.actions || []).filter((action) => {
         const reply = String(action.reply || "").toLowerCase();
         return action.type !== "danger" && reply !== "reject" && !reply.includes("deny");
       });
       const choice2 = (_b = (_a = allowed.find((action) => String(action.reply || "").toLowerCase() === "always")) != null ? _a : allowed.find((action) => String(action.reply || "").toLowerCase() === "once")) != null ? _b : allowed[0];
       if (!(choice2 == null ? void 0 : choice2.reply) || !this.adapter.replyPermission) {
-        throw new Error(`\u65E0\u6CD5\u81EA\u52A8\u6388\u6743 OpenCode \u6743\u9650\uFF1A${request.summary}`);
+        throw new Error(`\u65E0\u6CD5\u81EA\u52A8\u6388\u6743 OpenCode \u6743\u9650\uFF1A${request2.summary}`);
       }
-      const accepted2 = await this.adapter.replyPermission(request.requestId, choice2.reply, "\u7528\u6237\u5DF2\u6388\u6743\u5B9A\u65F6\u4EFB\u52A1\u5B8C\u5168\u63A7\u5236\u5E76\u81EA\u52A8\u7EE7\u7EED");
+      const accepted2 = await this.adapter.replyPermission(request2.requestId, choice2.reply, "\u7528\u6237\u5DF2\u6388\u6743\u5B9A\u65F6\u4EFB\u52A1\u5B8C\u5168\u63A7\u5236\u5E76\u81EA\u52A8\u7EE7\u7EED");
       if (!accepted2)
-        throw new Error(`OpenCode \u6743\u9650\u81EA\u52A8\u6388\u6743\u5931\u8D25\uFF1A${request.summary}`);
-      console.log(`[\u5B9A\u65F6\u4EFB\u52A1] \u5DF2\u81EA\u52A8\u6388\u6743\u6743\u9650\uFF1A${request.summary} -> ${choice2.reply}`);
+        throw new Error(`OpenCode \u6743\u9650\u81EA\u52A8\u6388\u6743\u5931\u8D25\uFF1A${request2.summary}`);
+      console.log(`[\u5B9A\u65F6\u4EFB\u52A1] \u5DF2\u81EA\u52A8\u6388\u6743\u6743\u9650\uFF1A${request2.summary} -> ${choice2.reply}`);
       return;
     }
     if (!this.adapter.replyQuestion) {
-      throw new Error(`\u65E0\u6CD5\u81EA\u52A8\u56DE\u7B54 OpenCode \u95EE\u9898\uFF1A${request.summary}`);
+      throw new Error(`\u65E0\u6CD5\u81EA\u52A8\u56DE\u7B54 OpenCode \u95EE\u9898\uFF1A${request2.summary}`);
     }
-    const choice = (request.actions || []).find(
+    const choice = (request2.actions || []).find(
       (action) => action.type !== "danger" && !action.custom && Array.isArray(action.answers) && action.answers.length > 0
     );
     const answers = (_c = choice == null ? void 0 : choice.answers) != null ? _c : [["\u8BF7\u7531\u5F53\u524D AI \u6839\u636E\u5B9A\u65F6\u4EFB\u52A1\u76EE\u6807\u9009\u62E9\u6700\u5408\u9002\u7684\u65B9\u6848\u5E76\u7EE7\u7EED\u6267\u884C"]];
-    const accepted = await this.adapter.replyQuestion(request.requestId, answers);
+    const accepted = await this.adapter.replyQuestion(request2.requestId, answers);
     if (!accepted)
-      throw new Error(`OpenCode \u95EE\u9898\u81EA\u52A8\u56DE\u7B54\u5931\u8D25\uFF1A${request.summary}`);
-    console.log(`[\u5B9A\u65F6\u4EFB\u52A1] \u5DF2\u81EA\u52A8\u56DE\u7B54\u95EE\u9898\uFF1A${request.summary}`);
+      throw new Error(`OpenCode \u95EE\u9898\u81EA\u52A8\u56DE\u7B54\u5931\u8D25\uFF1A${request2.summary}`);
+    console.log(`[\u5B9A\u65F6\u4EFB\u52A1] \u5DF2\u81EA\u52A8\u56DE\u7B54\u95EE\u9898\uFF1A${request2.summary}`);
   }
   async expandPromptContent(content, sourcePath = "") {
     let output = content;
@@ -5713,13 +5748,13 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(containerEl).setName("\u6A21\u677F\u6587\u4EF6\u5939\u8DEF\u5F84").setDesc("\u6BCF\u884C\u4E00\u4E2A\u6587\u4EF6\u5939\u8DEF\u5F84 (\u76F8\u5BF9\u4E8E\u5E93\u6839\u76EE\u5F55)\uFF0C\u5C06\u4ECE\u6240\u6709\u8DEF\u5F84\u4E2D\u67E5\u627E .md \u6A21\u677F\u3002").addTextArea((text) => {
       templatePathsText = text;
       text.setValue(this.plugin.getTemplateFolderPaths().join("\n")).onChange(async (value) => {
-        this.plugin.settings.templatePaths = parseTemplatePaths(value);
+        this.plugin.settings.templatePaths = parseTemplatePaths2(value);
         await this.plugin.saveSettings();
       });
       text.inputEl.rows = 3;
     }).addButton((button) => button.setButtonText("\u6DFB\u52A0").onClick(() => {
       new FolderSuggestModal(this.plugin.app, (folder) => {
-        const next = parseTemplatePaths([...this.plugin.getTemplateFolderPaths(), folder.path]);
+        const next = parseTemplatePaths2([...this.plugin.getTemplateFolderPaths(), folder.path]);
         this.plugin.settings.templatePaths = next;
         this.plugin.saveSettings();
         templatePathsText.setValue(next.join("\n"));
@@ -5729,13 +5764,13 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     new import_obsidian2.Setting(containerEl).setName("Skills \u6587\u4EF6\u5939\u8DEF\u5F84").setDesc("\u6BCF\u884C\u4E00\u4E2A\u6587\u4EF6\u5939\u8DEF\u5F84 (\u76F8\u5BF9\u4E8E\u5E93\u6839\u76EE\u5F55)\uFF0C\u7528\u4E8E\u5B58\u653E skills \u6587\u4EF6\u3002").addTextArea((text) => {
       skillsPathsText = text;
       text.setValue(this.plugin.getSkillsFolderPaths().join("\n")).onChange(async (value) => {
-        this.plugin.settings.skillsPaths = parseTemplatePaths(value);
+        this.plugin.settings.skillsPaths = parseTemplatePaths2(value);
         await this.plugin.saveSettings();
       });
       text.inputEl.rows = 3;
     }).addButton((button) => button.setButtonText("\u6DFB\u52A0").onClick(() => {
       new FolderSuggestModal(this.plugin.app, (folder) => {
-        const next = parseTemplatePaths([...this.plugin.getSkillsFolderPaths(), folder.path]);
+        const next = parseTemplatePaths2([...this.plugin.getSkillsFolderPaths(), folder.path]);
         this.plugin.settings.skillsPaths = next;
         this.plugin.saveSettings();
         skillsPathsText.setValue(next.join("\n"));
@@ -5744,14 +5779,14 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     let extraSkillsPathsText;
     new import_obsidian2.Setting(containerEl).setName("\u989D\u5916 Skills \u8DEF\u5F84").setDesc("\u6BCF\u884C\u4E00\u4E2A\u8DEF\u5F84\uFF08\u5E93\u5185\u76F8\u5BF9\u8DEF\u5F84\u6216\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002\u5C06\u8FFD\u52A0\u5230 skills \u641C\u7D22\u8DEF\u5F84\u3002").addTextArea((text) => {
       extraSkillsPathsText = text;
-      text.setValue(parseTemplatePaths(this.plugin.settings.lskillPaths).join("\n")).onChange(async (value) => {
-        this.plugin.settings.lskillPaths = parseTemplatePaths(value);
+      text.setValue(parseTemplatePaths2(this.plugin.settings.lskillPaths).join("\n")).onChange(async (value) => {
+        this.plugin.settings.lskillPaths = parseTemplatePaths2(value);
         await this.plugin.saveSettings();
       });
       text.inputEl.rows = 3;
     }).addButton((button) => button.setButtonText("\u6DFB\u52A0").onClick(() => {
       new FolderSuggestModal(this.plugin.app, (folder) => {
-        const next = parseTemplatePaths([...this.plugin.settings.lskillPaths || [], folder.path]);
+        const next = parseTemplatePaths2([...this.plugin.settings.lskillPaths || [], folder.path]);
         this.plugin.settings.lskillPaths = next;
         this.plugin.saveSettings();
         extraSkillsPathsText.setValue(next.join("\n"));

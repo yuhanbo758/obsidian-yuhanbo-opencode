@@ -1,0 +1,45 @@
+name: Publish Obsidian Release
+
+on:
+  push:
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing version tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: obsidian-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.version || github.ref_name }}
+      - name: Check and publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$VERSION" = "$(jq -er .version manifest.json)"
+          test -s main.js
+          test -s styles.css
+          node --check main.js
+          ! grep -q 'sourceMappingURL=' main.js
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = false
+            gh release download "$VERSION" --pattern '*' --dir "$RUNNER_TEMP/verified"
+            for file in main.js manifest.json styles.css; do cmp "$file" "$RUNNER_TEMP/verified/$file"; done
+            exit 0
+          fi
+          gh release create "$VERSION" main.js manifest.json styles.css --verify-tag --title "$VERSION" --generate-notes

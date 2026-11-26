@@ -1,0 +1,10 @@
+{
+	"id": "yuhanbo-opencode",
+	"name": "yuhanbo-opencode",
+	"version": "1.3.0",
+	"minAppVersion": "1.5.7",
+	"description": "使用 OpenCode 与笔记对话、搜索和改写，或将工作流程保存为自动化任务.",
+	"author": "余汉波",
+	"authorUrl": "https://github.com/yuhanbo758",
+	"isDesktopOnly": true
+}

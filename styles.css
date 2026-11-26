@@ -1,0 +1,36 @@
+.iflow-settings {
+	max-width: 900px;
+}
+
+.iflow-settings-intro {
+	margin: 0 0 20px;
+	color: var(--text-muted);
+}
+
+.iflow-settings-section {
+	margin: 28px 0 4px;
+	padding: 12px 14px;
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+}
+
+.iflow-settings-section h3 {
+	margin: 0;
+	font-size: var(--font-ui-medium);
+}
+
+.iflow-settings-section p {
+	margin: 5px 0 0;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.iflow-settings .setting-item {
+	padding-left: 10px;
+	padding-right: 10px;
+}
+
+.iflow-settings .setting-item-description {
+	line-height: 1.5;
+}

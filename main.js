@@ -37,8 +37,6 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/skills-paths.js
 var require_skills_paths = __commonJS({
   "src/skills-paths.js"(exports, module2) {
-    var path4 = require("path");
-    var fs2 = require("fs");
     function normalizeSettingPath(value) {
       if (typeof value !== "string")
         return "";
@@ -81,107 +79,8 @@ var require_skills_paths = __commonJS({
     function isLikelyWindowsAbsolutePath2(value) {
       return /^[a-zA-Z]:[\\/]/.test(value);
     }
-    function resolveSkillsPathsAbs3(settings, vaultPath) {
-      const raw = parseTemplatePaths2([...settings.skillsPaths || [], ...settings.lskillPaths || []]);
-      const out = [];
-      const seen = /* @__PURE__ */ new Set();
-      const invalid = [];
-      const add = (p) => {
-        if (!p)
-          return;
-        const key = String(p).toLowerCase();
-        if (seen.has(key))
-          return;
-        seen.add(key);
-        out.push(String(p));
-      };
-      for (const p of raw) {
-        if (!p)
-          continue;
-        const abs = isLikelyWindowsAbsolutePath2(p) || p.startsWith("/") ? p : path4.join(vaultPath, p);
-        try {
-          if (fs2.existsSync(abs) && fs2.statSync(abs).isDirectory()) {
-            add(abs);
-          } else {
-            invalid.push(abs);
-          }
-        } catch (e) {
-          invalid.push(abs);
-        }
-      }
-      const autoCandidates = [".opencode/skills", ".opencode"];
-      for (const rel of autoCandidates) {
-        try {
-          const abs = path4.join(vaultPath, rel);
-          if (fs2.existsSync(abs))
-            add(abs);
-        } catch (e) {
-        }
-      }
-      if (invalid.length > 0) {
-        console.warn("[skills-paths] invalid skills paths ignored:", invalid);
-      }
-      return out;
-    }
-    function ensureProjectSkills(projectRootAbs, skillsPathsAbs, projectFolderName) {
-      const destRoot = path4.join(projectRootAbs, projectFolderName, "skills");
-      try {
-        fs2.mkdirSync(destRoot, { recursive: true });
-      } catch (e) {
-        return;
-      }
-      const norm = (p) => String(p).replace(/\//g, "\\").replace(/\\+$/g, "").toLowerCase();
-      const destKey = norm(destRoot);
-      const linkOrCopyDir = (srcDir, destDir) => {
-        try {
-          if (fs2.existsSync(destDir))
-            return;
-          try {
-            fs2.symlinkSync(srcDir, destDir, "junction");
-            return;
-          } catch (e) {
-            fs2.cpSync(srcDir, destDir, { recursive: true });
-          }
-        } catch (e) {
-          return;
-        }
-      };
-      for (const root of skillsPathsAbs) {
-        if (!root)
-          continue;
-        const rootKey = norm(root);
-        if (rootKey === destKey)
-          continue;
-        try {
-          if (!fs2.existsSync(root))
-            continue;
-          const stats = fs2.statSync(root);
-          if (!stats.isDirectory())
-            continue;
-          const entries = fs2.readdirSync(root, { withFileTypes: true });
-          const hasSkillToml = entries.some((e) => e.isFile() && e.name.toLowerCase() === "skill.toml");
-          if (hasSkillToml) {
-            const name = path4.basename(String(root).replace(/[\\/]+$/g, ""));
-            if (name)
-              linkOrCopyDir(root, path4.join(destRoot, name));
-            continue;
-          }
-          for (const e of entries) {
-            if (!e.isDirectory())
-              continue;
-            const src = path4.join(root, e.name);
-            const dest = path4.join(destRoot, e.name);
-            linkOrCopyDir(src, dest);
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-    }
     module2.exports = {
       parseTemplatePaths: parseTemplatePaths2,
-      resolveSkillsPathsAbs: resolveSkillsPathsAbs3,
-      ensureProjectSkills,
       isLikelyWindowsAbsolutePath: isLikelyWindowsAbsolutePath2,
       normalizeSettingPath
     };
@@ -372,14 +271,14 @@ var require_weighted_search = __commonJS({
           if (!id)
             continue;
           const title = String((doc == null ? void 0 : doc.title) || "");
-          const path4 = (doc == null ? void 0 : doc.path) ? String(doc.path) : id;
+          const path3 = (doc == null ? void 0 : doc.path) ? String(doc.path) : id;
           const content = String((doc == null ? void 0 : doc.content) || "");
           const titleLower = title.toLowerCase();
           const docLen = countDocLength(title + "\n" + content);
           totalLen += docLen;
           this.docs.set(id, {
             id,
-            path: path4,
+            path: path3,
             title,
             titleLower,
             content,
@@ -518,10 +417,6 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian2 = require("obsidian");
 
-// src/adapter/opencode-adapter.ts
-var path2 = __toESM(require("path"));
-var import_child_process2 = require("child_process");
-
 // src/session/message-utils.ts
 function normalizeToolArgs(input) {
   if (typeof input === "string") {
@@ -605,29 +500,46 @@ function formatElapsedDuration(ms) {
 var net = __toESM(require("net"));
 var path = __toESM(require("path"));
 var import_child_process = require("child_process");
-function resolveCommandDir(cmdName) {
+function findWindowsOpenCode(installDir, systemDir) {
   var _a;
-  try {
-    const isWin = process.platform === "win32";
-    const whichCmd = isWin ? `where ${cmdName}` : `which ${cmdName}`;
-    const result = (0, import_child_process.execSync)(whichCmd, { encoding: "utf-8", timeout: 5e3 }).trim();
-    const firstLine = (_a = result.split(/\r?\n/)[0]) == null ? void 0 : _a.trim();
-    if (firstLine) {
-      return path.dirname(firstLine);
+  const searchPath = installDir ? "$YBO_OPENCODE_INSTALL" : "$PATH";
+  const env = installDir ? { ...process.env, YBO_OPENCODE_INSTALL: installDir } : process.env;
+  for (const name of ["opencode.exe", "opencode.cmd"]) {
+    try {
+      const matches = (0, import_child_process.execFileSync)(path.join(systemDir, "where.exe"), [`${searchPath}:${name}`], {
+        env,
+        encoding: "utf-8",
+        timeout: 5e3,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"]
+      });
+      const match = installDir ? path.join(installDir, name) : (_a = matches.split(/\r?\n/)[0]) == null ? void 0 : _a.trim();
+      if (match && path.isAbsolute(match))
+        return match;
+    } catch (e) {
     }
-  } catch (e) {
   }
-  return null;
+  throw new Error("\u627E\u4E0D\u5230 OpenCode\u3002\u8BF7\u68C0\u67E5\u5B89\u88C5\u76EE\u5F55\u6216 PATH\u3002");
 }
-function ensureCommandInPath(cmdName) {
-  const dir = resolveCommandDir(cmdName);
-  if (!dir)
-    return;
-  const sep = process.platform === "win32" ? ";" : ":";
-  const currentPath = process.env.PATH || "";
-  if (!currentPath.split(sep).some((value) => value.toLowerCase() === dir.toLowerCase())) {
-    process.env.PATH = `${dir}${sep}${currentPath}`;
+function spawnOpenCode(installDir, command, options) {
+  if (command.type === "serve" && (!Number.isInteger(command.port) || command.port < 1 || command.port > 65535)) {
+    throw new Error("OpenCode \u670D\u52A1\u7AEF\u53E3\u5FC5\u987B\u5728 1\u201365535 \u8303\u56F4\u5185\u3002");
   }
+  const args = command.type === "serve" ? ["serve", "--port", String(command.port)] : ["models"];
+  if (process.platform !== "win32") {
+    return (0, import_child_process.spawn)(installDir ? path.join(installDir, "opencode") : "opencode", args, options);
+  }
+  const systemDir = path.join(process.env.SystemRoot || "C:\\Windows", "System32");
+  const executable = findWindowsOpenCode(installDir, systemDir);
+  if (!executable.toLowerCase().endsWith(".cmd"))
+    return (0, import_child_process.spawn)(executable, args, options);
+  if (/["%\r\n]/.test(executable))
+    throw new Error("OpenCode \u5B89\u88C5\u8DEF\u5F84\u5305\u542B cmd.exe \u4E0D\u652F\u6301\u7684\u5B57\u7B26\u3002");
+  return (0, import_child_process.spawn)(path.join(systemDir, "cmd.exe"), ["/d", "/v:off", "/s", "/c", `""${executable}" ${args.join(" ")}"`], {
+    ...options,
+    windowsHide: true,
+    windowsVerbatimArguments: true
+  });
 }
 function checkPort(port) {
   return new Promise((resolve) => {
@@ -664,8 +576,6 @@ function waitForPort(port, timeoutMs) {
 }
 
 // src/adapter/opencode-adapter.ts
-var SkillsPaths = require_skills_paths();
-var { resolveSkillsPathsAbs } = SkillsPaths;
 function getOpenCodeMessageRole(message) {
   var _a, _b, _c;
   return String((_c = (_b = (_a = message == null ? void 0 : message.info) == null ? void 0 : _a.role) != null ? _b : message == null ? void 0 : message.role) != null ? _c : "");
@@ -714,7 +624,6 @@ var OpenCodeAdapter = class {
     this.promptRequestSeq = 0;
     /** 当前对话轮次令牌，旧轮次事件不应污染当前输出 */
     this.currentTurnToken = "";
-    this.skillPathsAbs = [];
     this.settings = settings;
     this.vaultPath = vaultPath;
   }
@@ -726,15 +635,8 @@ var OpenCodeAdapter = class {
   }
   async connect(cwd) {
     await this.disconnect();
-    if (this.settings.opencodePath) {
-      const pathSeparator = process.platform === "win32" ? ";" : ":";
-      process.env.PATH = `${this.settings.opencodePath}${pathSeparator}${process.env.PATH}`;
-    } else {
-      ensureCommandInPath("opencode");
-    }
     const cwdToUse = cwd || this.vaultPath;
     this.currentWorkspace = cwdToUse;
-    this.skillPathsAbs = this.resolveSkillsPathsAbs();
     const portMatch = this.settings.opencodeUrl.match(/:(\d+)/);
     const portToUse = (portMatch == null ? void 0 : portMatch[1]) ? Number(portMatch[1]) : 8091;
     this.baseUrl = `http://localhost:${portToUse}`;
@@ -1895,24 +1797,7 @@ var OpenCodeAdapter = class {
     return new Promise((resolve) => {
       var _a, _b;
       try {
-        let cmd = "opencode";
-        if (this.settings.opencodePath) {
-          const suffix = process.platform === "win32" ? ".cmd" : "";
-          cmd = path2.join(this.settings.opencodePath, `opencode${suffix}`);
-        } else if (process.platform === "win32") {
-          cmd = "opencode.cmd";
-        }
-        const args = [
-          "serve",
-          "--port",
-          port.toString()
-        ];
-        console.log(`[OpenCode] \u542F\u52A8\u547D\u4EE4: ${cmd} ${args.join(" ")}`);
-        const env = { ...process.env };
-        this.process = (0, import_child_process2.spawn)(cmd, args, {
-          shell: true,
-          env,
-          detached: false,
+        this.process = spawnOpenCode(this.settings.opencodePath, { type: "serve", port }, {
           cwd
         });
         (_a = this.process.stdout) == null ? void 0 : _a.on("data", (data) => {
@@ -1935,9 +1820,6 @@ var OpenCodeAdapter = class {
         resolve(false);
       }
     });
-  }
-  resolveSkillsPathsAbs() {
-    return resolveSkillsPathsAbs(this.settings, this.vaultPath);
   }
 };
 
@@ -2617,10 +2499,8 @@ function verifyAutomationLicense(code, publicKey = issuerPublicKey) {
 // main.ts
 var net2 = __toESM(require("net"));
 var tls = __toESM(require("tls"));
-var path3 = __toESM(require("path"));
-var fs = __toESM(require("fs"));
-var import_child_process3 = require("child_process");
-var SkillsPaths2 = require_skills_paths();
+var path2 = __toESM(require("path"));
+var SkillsPaths = require_skills_paths();
 var WeightedSearch = require_weighted_search();
 var DEFAULT_SETTINGS = {
   cliBackend: "opencode",
@@ -2708,14 +2588,11 @@ function parseModelsOutput(stdout) {
   }
   return models;
 }
-function runCliCommand(cmd, args, timeoutMs = 15e3) {
+function readOpenCodeModels(installDir, timeoutMs = 15e3) {
   return new Promise((resolve, reject) => {
     var _a, _b;
     try {
-      const fullCmd = `"${cmd}" ${args.join(" ")}`;
-      const proc = (0, import_child_process3.spawn)(fullCmd, [], {
-        shell: true,
-        env: process.env,
+      const proc = spawnOpenCode(installDir, { type: "models" }, {
         stdio: ["ignore", "pipe", "pipe"]
       });
       let stdout = "";
@@ -2752,17 +2629,7 @@ function runCliCommand(cmd, args, timeoutMs = 15e3) {
 }
 async function fetchOpenCodeModels(opencodePath) {
   try {
-    let cmd = "opencode";
-    if (opencodePath) {
-      const suffix = process.platform === "win32" ? ".cmd" : "";
-      cmd = path3.join(opencodePath, `opencode${suffix}`);
-    } else {
-      ensureCommandInPath("opencode");
-      if (process.platform === "win32") {
-        cmd = "opencode.cmd";
-      }
-    }
-    const result = await runCliCommand(cmd, ["models"]);
+    const result = await readOpenCodeModels(opencodePath);
     if (!result)
       return [];
     return parseModelsOutput(result);
@@ -2781,13 +2648,10 @@ function getModelsForBackend(backend, currentModel) {
   return models;
 }
 function parseTemplatePaths(value) {
-  return SkillsPaths2.parseTemplatePaths(value);
-}
-function resolveSkillsPathsAbs2(settings, vaultPath) {
-  return SkillsPaths2.resolveSkillsPathsAbs(settings, vaultPath);
+  return SkillsPaths.parseTemplatePaths(value);
 }
 function isLikelyWindowsAbsolutePath(value) {
-  return SkillsPaths2.isLikelyWindowsAbsolutePath(value);
+  return SkillsPaths.isLikelyWindowsAbsolutePath(value);
 }
 function isLikelyFileUrl(value) {
   return value.startsWith("file://");
@@ -2881,7 +2745,7 @@ function getAbsolutePathForAbstractFile(app, file) {
     return adapterAny.getFullPath(file.path);
   }
   if (typeof adapterAny.getBasePath === "function") {
-    return path3.join(adapterAny.getBasePath(), file.path);
+    return path2.join(adapterAny.getBasePath(), file.path);
   }
   return null;
 }
@@ -4858,28 +4722,31 @@ ${activeDataviewContext}`;
       '  obsidian property:read path="\u7B14\u8BB0\u8DEF\u5F84.md" name="\u5C5E\u6027\u540D"  # \u8BFB\u53D6\u5C5E\u6027\u503C'
     ].join("\n");
     const fileContexts = [];
-    const pathRegex = /"([a-zA-Z]:\\[^"]+|(?:\/[^"]+))"/g;
+    const pathRegex = /"([a-zA-Z]:[\\/][^"]+|\/[^"]+)"/g;
     let match;
     while ((match = pathRegex.exec(text)) !== null) {
       const filePath = match[1];
+      if (!vaultBaseAbsPath)
+        continue;
+      const relative2 = path2.relative(vaultBaseAbsPath, filePath);
+      if (!relative2 || path2.isAbsolute(relative2) || relative2 === ".." || relative2.startsWith(".." + path2.sep))
+        continue;
+      const file = this.plugin.app.vault.getAbstractFileByPath((0, import_obsidian2.normalizePath)(relative2));
+      if (!(file instanceof import_obsidian2.TFile))
+        continue;
       try {
-        if (fs.existsSync(filePath)) {
-          const stats = fs.statSync(filePath);
-          if (stats.isFile()) {
-            if (stats.size > 100 * 1024) {
-              fileContexts.push(`[\u6587\u4EF6: ${filePath}]
+        if (file.stat.size > 100 * 1024) {
+          fileContexts.push(`[\u6587\u4EF6: ${filePath}]
 (\u6587\u4EF6\u8FC7\u5927\uFF0C\u5DF2\u5FFD\u7565\u5185\u5BB9)`);
-            } else {
-              const content = fs.readFileSync(filePath, "utf-8");
-              fileContexts.push(`[\u6587\u4EF6: ${filePath}]
+          continue;
+        }
+        const content = await this.plugin.app.vault.read(file);
+        fileContexts.push(`[\u6587\u4EF6: ${filePath}]
 \`\`\`
 ${content}
 \`\`\``);
-            }
-          }
-        }
-      } catch (e) {
-        console.error(`\u65E0\u6CD5\u8BFB\u53D6\u6587\u4EF6: ${filePath}`, e);
+      } catch (error) {
+        console.error("\u65E0\u6CD5\u8BFB\u53D6\u5E93\u5185\u6587\u4EF6:", error);
       }
     }
     if (fileContexts.length > 0) {
@@ -4995,416 +4862,6 @@ ${fullPrompt}` : fullPrompt;
     }
   }
 };
-var SkillRunner = class {
-  constructor(plugin) {
-    this.cache = /* @__PURE__ */ new Map();
-    this.lastLoadedAt = 0;
-    this.plugin = plugin;
-  }
-  async execute(name, ctx) {
-    const skills = await this.loadSkills();
-    const key = (name || "").trim();
-    if (!key)
-      throw new Error("\u5DE5\u5177\u540D\u79F0\u4E3A\u7A7A");
-    const candidates = this.buildSkillKeyCandidates(key);
-    let skill;
-    for (const c of candidates) {
-      skill = skills.get(c);
-      if (skill)
-        break;
-    }
-    if (!skill)
-      throw new Error(`\u672A\u627E\u5230\u5DE5\u5177: ${name}`);
-    if (skill.type === "shell")
-      return await this.runShellSkill(skill, ctx);
-    return this.runPromptSkill(skill, ctx);
-  }
-  buildSkillKeyCandidates(input) {
-    const out = [];
-    const add = (v) => {
-      const t = v.trim();
-      if (!t)
-        return;
-      out.push(t);
-      out.push(t.toLowerCase());
-    };
-    add(input);
-    const parts = input.split(/[\/:.]/).filter(Boolean);
-    if (parts.length > 1)
-      add(parts[parts.length - 1]);
-    return Array.from(new Set(out));
-  }
-  async loadSkills() {
-    const now = Date.now();
-    if (now - this.lastLoadedAt < 3e3 && this.cache.size > 0)
-      return this.cache;
-    const files = await this.collectSkillFiles();
-    const map = /* @__PURE__ */ new Map();
-    for (const file of files) {
-      try {
-        const defs = await this.parseSkillFile(file);
-        for (const def of defs) {
-          if (!(def == null ? void 0 : def.name))
-            continue;
-          map.set(def.name, def);
-          map.set(def.name.toLowerCase(), def);
-        }
-      } catch (e) {
-        console.error("[SkillRunner] \u89E3\u6790\u6280\u80FD\u5931\u8D25:", file.path, e);
-      }
-    }
-    const builtin = this.plugin.getBuiltinSkills();
-    for (const def of builtin) {
-      if (!(def == null ? void 0 : def.name))
-        continue;
-      if (!map.has(def.name))
-        map.set(def.name, def);
-      const lower = def.name.toLowerCase();
-      if (!map.has(lower))
-        map.set(lower, def);
-    }
-    this.cache = map;
-    this.lastLoadedAt = now;
-    return map;
-  }
-  async listSkills() {
-    const map = await this.loadSkills();
-    const seen = /* @__PURE__ */ new Set();
-    const out = [];
-    for (const def of map.values()) {
-      const key = def.name.toLowerCase();
-      if (seen.has(key))
-        continue;
-      seen.add(key);
-      out.push(def);
-    }
-    return out;
-  }
-  async collectSkillFiles() {
-    var _a, _b;
-    const rawPaths = this.plugin.getSkillsFolderPaths().map((p) => (0, import_obsidian2.normalizePath)(p)).filter(Boolean);
-    const vaultAdapter = this.plugin.app.vault.adapter;
-    const vaultBase = ((_a = vaultAdapter == null ? void 0 : vaultAdapter.getBasePath) == null ? void 0 : _a.call(vaultAdapter)) || "";
-    const filesMap = /* @__PURE__ */ new Map();
-    const addFile = (entry) => {
-      const key = (entry.absPath || entry.path).toLowerCase();
-      if (filesMap.has(key))
-        return;
-      filesMap.set(key, entry);
-    };
-    const relativePaths = rawPaths.filter((p) => !(isLikelyWindowsAbsolutePath(p) || p.startsWith("/")));
-    if (relativePaths.length > 0) {
-      const skillsPaths = relativePaths.map((p) => p.replace(/\/+$/, "")).filter(Boolean);
-      const skillsPathsLower = skillsPaths.map((p) => p.toLowerCase());
-      const files = this.plugin.app.vault.getFiles();
-      for (const f of files) {
-        const fpl = f.path.toLowerCase();
-        if (skillsPathsLower.some((p) => fpl === p || fpl.startsWith(p + "/"))) {
-          const absPath = ((_b = vaultAdapter == null ? void 0 : vaultAdapter.getFullPath) == null ? void 0 : _b.call(vaultAdapter, f.path)) || "";
-          addFile({ path: f.path, extension: f.extension, basename: f.basename, vaultFile: f, absPath });
-        }
-      }
-    }
-    const absRoots = resolveSkillsPathsAbs2(this.plugin.settings, vaultBase);
-    for (const root of absRoots) {
-      if (!(isLikelyWindowsAbsolutePath(root) || root.startsWith("/")))
-        continue;
-      await this.collectFsSkillFiles(root, addFile);
-    }
-    return Array.from(filesMap.values());
-  }
-  async collectFsSkillFiles(root, addFile) {
-    if (!root)
-      return;
-    let stats;
-    try {
-      stats = await fs.promises.stat(root);
-    } catch (e) {
-      return;
-    }
-    const isSkillExt = (p) => {
-      const ext = path3.extname(p).toLowerCase();
-      return ext === ".md" || ext === ".json";
-    };
-    if (stats.isFile()) {
-      if (isSkillExt(root)) {
-        const ext = path3.extname(root).replace(/^\./, "").toLowerCase();
-        const basename2 = path3.basename(root, path3.extname(root));
-        addFile({ path: root, extension: ext, basename: basename2, absPath: root });
-      }
-      return;
-    }
-    if (!stats.isDirectory())
-      return;
-    const stack = [root];
-    while (stack.length > 0) {
-      const current = stack.pop();
-      let entries = [];
-      try {
-        entries = await fs.promises.readdir(current, { withFileTypes: true });
-      } catch (e) {
-        continue;
-      }
-      for (const entry of entries) {
-        const full = path3.join(current, entry.name);
-        if (entry.isDirectory()) {
-          stack.push(full);
-        } else if (entry.isFile()) {
-          if (!isSkillExt(full))
-            continue;
-          const ext = path3.extname(full).replace(/^\./, "").toLowerCase();
-          const basename2 = path3.basename(full, path3.extname(full));
-          addFile({ path: full, extension: ext, basename: basename2, absPath: full });
-        }
-      }
-    }
-  }
-  async parseSkillFile(file) {
-    const ext = file.extension.toLowerCase();
-    const content = file.vaultFile ? await this.plugin.app.vault.read(file.vaultFile) : await fs.promises.readFile(file.path, "utf-8");
-    if (ext === "json") {
-      return this.parseJsonSkill(file, content);
-    }
-    return this.parseMarkdownSkill(file, content);
-  }
-  parseJsonSkill(file, content) {
-    let data = null;
-    try {
-      data = JSON.parse(content);
-    } catch (e) {
-      data = null;
-    }
-    if (!data)
-      return [];
-    const list = Array.isArray(data) ? data : [data];
-    const out = [];
-    for (const item of list) {
-      if (!item || typeof item !== "object")
-        continue;
-      const name = String(item.name || file.basename || "").trim();
-      if (!name)
-        continue;
-      const type = item.type === "prompt" ? "prompt" : "shell";
-      const def = {
-        name,
-        type,
-        description: item.description ? String(item.description) : void 0,
-        command: item.command ? String(item.command) : void 0,
-        args: Array.isArray(item.args) ? item.args.map((v) => String(v)) : void 0,
-        cwd: item.cwd ? String(item.cwd) : void 0,
-        timeoutMs: Number.isFinite(item.timeoutMs) ? Number(item.timeoutMs) : void 0,
-        script: item.script ? String(item.script) : void 0,
-        includeContext: Boolean(item.includeContext)
-      };
-      out.push(def);
-    }
-    return out;
-  }
-  parseMarkdownSkill(file, content) {
-    const { frontmatter, body } = this.extractFrontmatter(content);
-    const codeBlock = this.extractFirstCodeBlock(body);
-    const name = String(frontmatter.name || file.basename || "").trim();
-    if (!name)
-      return [];
-    let type = "prompt";
-    if (frontmatter.type === "shell" || frontmatter.type === "prompt") {
-      type = frontmatter.type;
-    } else if ((codeBlock == null ? void 0 : codeBlock.language) && ["bash", "sh", "powershell", "ps1", "cmd"].includes(codeBlock.language)) {
-      type = "shell";
-    }
-    const args = this.parseMaybeArray(frontmatter.args);
-    const def = {
-      name,
-      type,
-      description: frontmatter.description ? String(frontmatter.description) : void 0,
-      command: frontmatter.command ? String(frontmatter.command) : void 0,
-      args,
-      cwd: frontmatter.cwd ? String(frontmatter.cwd) : void 0,
-      timeoutMs: Number.isFinite(frontmatter.timeoutMs) ? Number(frontmatter.timeoutMs) : void 0,
-      script: frontmatter.script ? String(frontmatter.script) : void 0,
-      includeContext: Boolean(frontmatter.includeContext)
-    };
-    if (type === "shell") {
-      if (!def.command && (codeBlock == null ? void 0 : codeBlock.content))
-        def.command = codeBlock.content.trim();
-      if (!def.command)
-        def.command = body.trim();
-    } else {
-      if (!def.script && (codeBlock == null ? void 0 : codeBlock.content))
-        def.script = codeBlock.content.trim();
-      if (!def.script)
-        def.script = body.trim();
-    }
-    return [def];
-  }
-  extractFrontmatter(content) {
-    const trimmed = content.trimStart();
-    if (!trimmed.startsWith("---"))
-      return { frontmatter: {}, body: content };
-    const lines = trimmed.split(/\r?\n/);
-    let endIndex = -1;
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].trim() === "---") {
-        endIndex = i;
-        break;
-      }
-    }
-    if (endIndex === -1)
-      return { frontmatter: {}, body: content };
-    const fmLines = lines.slice(1, endIndex);
-    const fm = {};
-    for (const line of fmLines) {
-      const idx = line.indexOf(":");
-      if (idx <= 0)
-        continue;
-      const key = line.slice(0, idx).trim();
-      const raw = line.slice(idx + 1).trim();
-      fm[key] = this.parseScalar(raw);
-    }
-    const body = lines.slice(endIndex + 1).join("\n");
-    return { frontmatter: fm, body };
-  }
-  extractFirstCodeBlock(body) {
-    const match = body.match(/```([\w-]+)?\s*\n([\s\S]*?)```/);
-    if (!match)
-      return null;
-    return { language: (match[1] || "").toLowerCase(), content: match[2] || "" };
-  }
-  parseScalar(raw) {
-    const v = raw.trim();
-    if (!v)
-      return "";
-    if (v === "true")
-      return true;
-    if (v === "false")
-      return false;
-    if (!isNaN(Number(v)))
-      return Number(v);
-    if (v.startsWith("[") && v.endsWith("]") || v.startsWith("{") && v.endsWith("}")) {
-      try {
-        return JSON.parse(v);
-      } catch (e) {
-        return v;
-      }
-    }
-    if (v.startsWith('"') && v.endsWith('"') || v.startsWith("'") && v.endsWith("'")) {
-      return v.slice(1, -1);
-    }
-    return v;
-  }
-  parseMaybeArray(value) {
-    if (!value)
-      return void 0;
-    if (Array.isArray(value))
-      return value.map((v) => String(v));
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (!trimmed)
-        return void 0;
-      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-        try {
-          return JSON.parse(trimmed).map((v) => String(v));
-        } catch (e) {
-          return [trimmed];
-        }
-      }
-      return [trimmed];
-    }
-    return void 0;
-  }
-  async runShellSkill(skill, ctx) {
-    const commandRaw = skill.command || "";
-    if (!commandRaw)
-      throw new Error(`\u5DE5\u5177 ${skill.name} \u672A\u63D0\u4F9B command`);
-    const args = (skill.args || []).map((arg) => this.applyContext(arg, ctx));
-    const command = this.applyContext(commandRaw, ctx);
-    const full = args.length > 0 ? `${command} ${args.map((a) => this.quoteArg(a)).join(" ")}` : command;
-    const cwd = this.resolveCwd(skill.cwd, ctx);
-    const timeoutMs = skill.timeoutMs && skill.timeoutMs > 0 ? skill.timeoutMs : 6e4;
-    return await this.spawnCommand(full, cwd, timeoutMs);
-  }
-  runPromptSkill(skill, ctx) {
-    let script = skill.script || "";
-    script = this.applyContext(script, ctx);
-    if (skill.includeContext) {
-      const contextText = [
-        `vaultBase: ${ctx.vaultBase}`,
-        `cwd: ${ctx.cwd}`,
-        `activeFileVaultPath: ${ctx.activeFileVaultPath}`,
-        `activeFileAbsPath: ${ctx.activeFileAbsPath}`,
-        `activeFolderVaultPath: ${ctx.activeFolderVaultPath}`,
-        `activeFolderAbsPath: ${ctx.activeFolderAbsPath}`,
-        `toolArgs: ${ctx.toolArgsText}`
-      ].join("\n");
-      script = `${script}
-
-${contextText}`.trim();
-    }
-    return script.trim();
-  }
-  applyContext(input, ctx) {
-    return input.replace(/\{\{toolArgs\}\}/g, ctx.toolArgsText || "").replace(/\{\{toolArgsText\}\}/g, ctx.toolArgsText || "").replace(/\{\{toolArgsJson\}\}/g, ctx.toolArgsJson || "").replace(/\{\{vaultBase\}\}/g, ctx.vaultBase || "").replace(/\{\{cwd\}\}/g, ctx.cwd || "").replace(/\{\{activeFileVaultPath\}\}/g, ctx.activeFileVaultPath || "").replace(/\{\{activeFileAbsPath\}\}/g, ctx.activeFileAbsPath || "").replace(/\{\{activeFolderVaultPath\}\}/g, ctx.activeFolderVaultPath || "").replace(/\{\{activeFolderAbsPath\}\}/g, ctx.activeFolderAbsPath || "");
-  }
-  resolveCwd(cwd, ctx) {
-    if (!cwd)
-      return ctx.cwd || ctx.vaultBase || "";
-    if (isLikelyWindowsAbsolutePath(cwd) || cwd.startsWith("/"))
-      return cwd;
-    return path3.join(ctx.vaultBase || "", cwd);
-  }
-  quoteArg(value) {
-    if (value.includes(" "))
-      return `"${value.replace(/"/g, '\\"')}"`;
-    return value;
-  }
-  spawnCommand(fullCommand, cwd, timeoutMs) {
-    return new Promise((resolve, reject) => {
-      var _a, _b;
-      let stdout = "";
-      let stderr = "";
-      let finished = false;
-      const proc = (0, import_child_process3.spawn)(fullCommand, [], {
-        shell: true,
-        cwd: cwd || void 0,
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      const timer = setTimeout(() => {
-        if (finished)
-          return;
-        finished = true;
-        try {
-          proc.kill();
-        } catch (e) {
-        }
-        reject(new Error(`\u5DE5\u5177\u6267\u884C\u8D85\u65F6(${timeoutMs}ms)`));
-      }, timeoutMs);
-      (_a = proc.stdout) == null ? void 0 : _a.on("data", (d) => {
-        stdout += d.toString();
-      });
-      (_b = proc.stderr) == null ? void 0 : _b.on("data", (d) => {
-        stderr += d.toString();
-      });
-      proc.on("error", (e) => {
-        if (finished)
-          return;
-        finished = true;
-        clearTimeout(timer);
-        reject(e);
-      });
-      proc.on("close", (code) => {
-        if (finished)
-          return;
-        finished = true;
-        clearTimeout(timer);
-        if (code === 0)
-          return resolve(stdout.trim());
-        const errText = stderr.trim() || stdout.trim();
-        reject(new Error(errText || `\u547D\u4EE4\u9000\u51FA\u7801 ${code}`));
-      });
-    });
-  }
-};
 var VaultWeightedSearchService = class {
   constructor(app, getSettings) {
     this.index = null;
@@ -5513,7 +4970,6 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     this.scheduledTaskTimers = /* @__PURE__ */ new Map();
     /** 防止同一个任务被定时器和“立即执行”按钮重复并发执行。 */
     this.runningScheduledTaskIds = /* @__PURE__ */ new Set();
-    this.skillRunner = null;
     this.vaultSearch = null;
     /** 当前正在进行的请求计数（支持并发请求如定时任务 + 手动聊天） */
     this.processingCount = 0;
@@ -5735,20 +5191,6 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     const pluginId2 = ((_a = this.manifest) == null ? void 0 : _a.id) || "yuhanbo-opencode";
     return (0, import_obsidian2.normalizePath)(`.obsidian/plugins/${pluginId2}/obsidian-cli.json`);
   }
-  getBuiltinSkills() {
-    if (!this.settings.obsidianCliEnabled)
-      return [];
-    const rawCmd = String(this.settings.obsidianCliCommand || "").trim() || "obsidian";
-    const quoted = rawCmd.includes(" ") && !/^".*"$/.test(rawCmd) ? `"${rawCmd}"` : rawCmd;
-    const command = `${quoted} {{toolArgsText}}`.trim();
-    return [{
-      name: "obsidian-cli",
-      type: "shell",
-      description: "Obsidian CLI",
-      command,
-      timeoutMs: 6e4
-    }];
-  }
   /**
    * 为聊天、编辑器操作和定时任务统一添加 Obsidian CLI 优先策略。
    * CLI 不支持或执行失败时允许回退，避免因为工具缺失导致任务停滞。
@@ -5815,182 +5257,6 @@ ${prompt}`;
     const base = await this.weightedSearch(query, override);
     const aiSummary = await this.aiSummarizeWeightedSearch(base.results, base.keywords);
     return { ...base, aiSummary };
-  }
-  resolveVaultWritePath(rawPath) {
-    const trimmed = stripQuotes(String(rawPath || "").trim());
-    if (!trimmed)
-      return null;
-    const obsidianPath = tryParseObsidianOpenUrlToVaultPath(trimmed);
-    const candidate = (0, import_obsidian2.normalizePath)((obsidianPath || trimmed).replace(/^[\/\\]+/, ""));
-    if (!candidate)
-      return null;
-    if (/^[a-zA-Z]:[\\/]/.test(candidate) || candidate.startsWith("\\\\") || candidate.startsWith("/") || /^file:/i.test(candidate) || candidate.includes(":") || candidate.split("/").includes("..")) {
-      return null;
-    }
-    return candidate;
-  }
-  extractToolWriteContent(toolArgs) {
-    var _a, _b, _c, _d;
-    if (toolArgs === null || toolArgs === void 0)
-      return "";
-    if (typeof toolArgs === "string")
-      return toolArgs;
-    if (typeof toolArgs !== "object")
-      return String(toolArgs);
-    const candidates = [
-      toolArgs.content,
-      toolArgs.text,
-      toolArgs.contents,
-      toolArgs.data,
-      toolArgs.value,
-      toolArgs.body,
-      (_a = toolArgs.input) == null ? void 0 : _a.content,
-      (_b = toolArgs.input) == null ? void 0 : _b.text,
-      (_c = toolArgs.args) == null ? void 0 : _c.content,
-      (_d = toolArgs.args) == null ? void 0 : _d.text
-    ];
-    for (const c of candidates) {
-      if (typeof c === "string")
-        return c;
-    }
-    return "";
-  }
-  async writeVaultFile(targetVaultPath, content) {
-    const normalized = (0, import_obsidian2.normalizePath)(targetVaultPath);
-    if (!normalized || normalized.split("/").includes("..")) {
-      throw new Error(`\u975E\u6CD5 vault \u8DEF\u5F84: ${targetVaultPath}`);
-    }
-    const parentFolder = normalized.split("/").slice(0, -1).join("/");
-    if (parentFolder)
-      await this.ensureFolderExists(parentFolder);
-    const existing = this.app.vault.getAbstractFileByPath(normalized);
-    if (existing instanceof import_obsidian2.TFile) {
-      await this.app.vault.modify(existing, content);
-      return `\u5DF2\u66F4\u65B0\u6587\u4EF6: ${normalized}`;
-    }
-    if (existing) {
-      throw new Error(`\u76EE\u6807\u8DEF\u5F84\u4E0D\u662F\u6587\u4EF6: ${normalized}`);
-    }
-    await this.app.vault.create(normalized, content);
-    return `\u5DF2\u521B\u5EFA\u6587\u4EF6: ${normalized}`;
-  }
-  async runBuiltinTool(toolName, toolArgs) {
-    const name = (toolName || "").trim().toLowerCase();
-    const readNames = /* @__PURE__ */ new Set(["read_file", "readfile", "read_text_file", "readtextfile", "read_textfile", "request/readtextfile", "readtextfile", "readfile", "read_text"]);
-    if (readNames.has(name)) {
-      let target2 = this.extractToolPath(toolArgs);
-      if (!target2) {
-        const inferred = this.getLastAbsolutePathFromChat();
-        if (inferred)
-          target2 = inferred;
-      }
-      if (!target2)
-        throw new Error("read_file \u7F3A\u5C11\u8DEF\u5F84\u53C2\u6570");
-      const absPath = this.resolveToolPathToAbsolute(target2);
-      if (!absPath)
-        throw new Error(`\u65E0\u6CD5\u89E3\u6790\u8DEF\u5F84: ${target2}`);
-      if (!fs.existsSync(absPath))
-        throw new Error(`\u6587\u4EF6\u4E0D\u5B58\u5728: ${absPath}`);
-      const stats = fs.statSync(absPath);
-      if (!stats.isFile())
-        throw new Error(`\u4E0D\u662F\u6587\u4EF6: ${absPath}`);
-      return fs.readFileSync(absPath, "utf-8");
-    }
-    const writeNames = /* @__PURE__ */ new Set([
-      "write",
-      "write_file",
-      "writefile",
-      "create_file",
-      "createfile",
-      "save_file",
-      "savefile",
-      "filesystem.write",
-      "filesystem.write_file"
-    ]);
-    if (!writeNames.has(name))
-      return null;
-    const target = this.extractToolPath(toolArgs);
-    if (!target)
-      throw new Error("write \u7F3A\u5C11\u8DEF\u5F84\u53C2\u6570");
-    const targetVaultPath = this.resolveVaultWritePath(target);
-    if (!targetVaultPath)
-      throw new Error(`write \u4EC5\u652F\u6301 Obsidian vault \u76F8\u5BF9\u8DEF\u5F84: ${target}`);
-    const content = this.extractToolWriteContent(toolArgs);
-    return await this.writeVaultFile(targetVaultPath, content);
-  }
-  extractToolPath(toolArgs) {
-    var _a, _b;
-    if (toolArgs === null || toolArgs === void 0)
-      return null;
-    if (typeof toolArgs === "string")
-      return toolArgs.trim();
-    if (typeof toolArgs !== "object")
-      return null;
-    const candidates = [
-      toolArgs.path,
-      toolArgs.file_path,
-      toolArgs.filePath,
-      toolArgs.filename,
-      toolArgs.file,
-      toolArgs.target,
-      toolArgs.input,
-      Array.isArray(toolArgs.paths) ? toolArgs.paths[0] : void 0,
-      Array.isArray(toolArgs.files) ? toolArgs.files[0] : void 0,
-      Array.isArray(toolArgs.args) ? toolArgs.args[0] : void 0,
-      (_a = toolArgs.args) == null ? void 0 : _a.path,
-      (_b = toolArgs.args) == null ? void 0 : _b.file
-    ];
-    for (const c of candidates) {
-      if (typeof c === "string" && c.trim())
-        return c.trim();
-    }
-    return null;
-  }
-  resolveToolPathToAbsolute(candidate) {
-    var _a, _b;
-    const trimmed = candidate.trim();
-    if (!trimmed)
-      return null;
-    const fromFileUrl = tryParseFileUrlToAbsolutePath(trimmed);
-    if (fromFileUrl)
-      return fromFileUrl;
-    const direct = stripQuotes(trimmed);
-    if (isLikelyWindowsAbsolutePath(direct) || direct.startsWith("/"))
-      return direct;
-    const obsidianPath = tryParseObsidianOpenUrlToVaultPath(trimmed);
-    const vaultCandidate = obsidianPath || trimmed;
-    const af = resolveAbstractFileFromCandidate(this.app, vaultCandidate);
-    if (af)
-      return getAbsolutePathForAbstractFile(this.app, af);
-    const vaultBase = ((_b = (_a = this.app.vault.adapter).getBasePath) == null ? void 0 : _b.call(_a)) || "";
-    if (!vaultBase)
-      return null;
-    return path3.join(vaultBase, vaultCandidate);
-  }
-  getLastAbsolutePathFromChat() {
-    try {
-      const leaves = this.app.workspace.getLeavesOfType(OPENCODE_CHAT_VIEW);
-      const leaf = leaves[0];
-      const view = leaf == null ? void 0 : leaf.view;
-      if (!(view instanceof IFlowChatView))
-        return null;
-      for (let i = view.chatHistory.length - 1; i >= 0; i--) {
-        const m = view.chatHistory[i];
-        if (m.role !== "user")
-          continue;
-        const text = m.content || "";
-        const pathRegex = /"([a-zA-Z]:\\[^\"]+|(?:\/[^"]+))"/g;
-        let match;
-        while ((match = pathRegex.exec(text)) !== null) {
-          const p = match[1];
-          if (p)
-            return p;
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
   }
   getContextFile() {
     const cached = this.lastActiveMarkdownFile;
@@ -6614,7 +5880,6 @@ ${body}`;
   async onload() {
     console.log("\u6B63\u5728\u52A0\u8F7D AI \u52A9\u624B\u63D2\u4EF6...");
     await this.loadSettings();
-    this.skillRunner = new SkillRunner(this);
     const onMdChange = (file) => {
       var _a, _b;
       if (!file)

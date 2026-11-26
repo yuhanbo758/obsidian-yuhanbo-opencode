@@ -1,5 +1,23 @@
 # yuhanbo-opencode
 
+## Overview
+
+Use OpenCode in the Obsidian desktop sidebar to chat with vault notes, search, rewrite selections, and save conversations as Markdown. The free edition includes these features. An optional activation code unlocks scheduled tasks, bulk note updates, and SMTP notifications.
+
+## Installation
+
+1. Install and configure OpenCode on your desktop.
+2. Download `main.js`, `manifest.json`, and `styles.css` from the same GitHub Release.
+3. Place those files in `.obsidian/plugins/yuhanbo-opencode/` inside your vault. Reload Obsidian and enable **yuhanbo-opencode** under **Settings → Community plugins**.
+
+## Usage
+
+Click the notebook assistant ribbon icon. Type `@` alone, choose a note, and enter a question in the chat. Use **Save** to keep the conversation as Markdown. To edit a note, select text and choose the plugin's insert or replace command from the Command Palette. For automation, open the plugin settings, select a Markdown prompt and output folder, then use **Run now** to verify the result before scheduling it.
+
+## Privacy
+
+The plugin connects to a local OpenCode service using HTTP and SSE. The selected model provider can receive the prompts, attachments, and note content you choose to use. The configured SMTP service receives task notices only when email is enabled. The plugin can access explicitly configured Skills folders outside the vault and can invoke the installed OpenCode or Obsidian CLI. Activation is verified offline, and there is no telemetry.
+
 在 Obsidian 桌面端使用 OpenCode 查找、引用和改写笔记，也可以把重复工作保存成定时任务。插件需要用户自行安装并配置 [OpenCode](https://opencode.ai/)。
 
 ## 安装

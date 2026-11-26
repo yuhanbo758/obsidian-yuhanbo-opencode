@@ -99,6 +99,7 @@ var import_obsidian2 = require("obsidian");
 
 // src/adapter/opencode-adapter.ts
 var http = __toESM(require("http"));
+var import_timers = require("timers");
 
 // src/session/message-utils.ts
 function normalizeToolArgs(input) {
@@ -184,6 +185,7 @@ function formatElapsedDuration(ms) {
 // src/adapter/opencode-utils.ts
 var net = __toESM(require("net"));
 var path = __toESM(require("path"));
+var import_promises = require("timers/promises");
 var import_child_process = require("child_process");
 function findWindowsOpenCode(installDir, systemDir) {
   var _a;
@@ -245,19 +247,15 @@ function checkPort(port) {
     socket.connect(port, "localhost");
   });
 }
-function waitForPort(port, timeoutMs) {
-  return new Promise((resolve) => {
-    const start = Date.now();
-    const poll = async () => {
-      const ready = await checkPort(port);
-      if (ready)
-        return resolve(true);
-      if (Date.now() - start >= timeoutMs)
-        return resolve(false);
-      setTimeout(poll, 500);
-    };
-    poll();
-  });
+async function waitForPort(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (!await checkPort(port)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0)
+      return false;
+    await (0, import_promises.setTimeout)(Math.min(500, remaining));
+  }
+  return true;
 }
 
 // src/core/json-value.ts
@@ -294,6 +292,7 @@ var OpenCodeAdapter = class {
   constructor(settings, vaultPath) {
     this.process = null;
     this.connected = false;
+    this.connectionAttempt = 0;
     this.baseUrl = "";
     this.authHeader = "";
     this.sessionId = null;
@@ -302,7 +301,7 @@ var OpenCodeAdapter = class {
     this.sseRequest = null;
     this.sseConnected = false;
     this.sseRetryTimer = null;
-    this.sseWaitConnectedTimer = null;
+    this.settleSseHandshake = null;
     this.pendingMessages = [];
     this.pendingResolve = null;
     this.lastAssistantMsgId = "";
@@ -345,7 +344,14 @@ var OpenCodeAdapter = class {
     return this.connected;
   }
   async connect(cwd) {
-    await this.disconnect();
+    const disconnecting = this.disconnect();
+    const attempt = this.connectionAttempt;
+    const assertCurrent = () => {
+      if (this.connectionAttempt !== attempt)
+        throw new Error("OpenCode \u8FDE\u63A5\u5DF2\u53D6\u6D88");
+    };
+    await disconnecting;
+    assertCurrent();
     const cwdToUse = cwd || this.vaultPath;
     this.currentWorkspace = cwdToUse;
     const portMatch = this.settings.opencodeUrl.match(/:(\d+)/);
@@ -357,53 +363,44 @@ var OpenCodeAdapter = class {
       this.authHeader = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
     }
     if (this.settings.autoStartProcess) {
-      if (!await this.checkHealth()) {
-        if (await checkPort(portToUse)) {
+      const alreadyHealthy = await this.checkHealth();
+      assertCurrent();
+      if (!alreadyHealthy) {
+        const portInUse = await checkPort(portToUse);
+        assertCurrent();
+        if (portInUse) {
           throw new Error(`\u7AEF\u53E3 ${portToUse} \u5DF2\u88AB\u5360\u7528\u4E14\u672A\u901A\u8FC7 OpenCode \u5065\u5EB7\u68C0\u67E5\uFF0C\u8BF7\u6838\u5BF9\u670D\u52A1\u6216\u66F4\u6362\u7AEF\u53E3`);
         }
         const started = await this.startProcess(portToUse, cwdToUse);
-        if (!started)
+        assertCurrent();
+        const startedProcess = this.process;
+        if (!started || !startedProcess)
           throw new Error("\u65E0\u6CD5\u542F\u52A8 opencode \u670D\u52A1\u5668");
-        const portReady = await new Promise((resolve) => {
-          let resolved = false;
-          const done = (v) => {
-            if (!resolved) {
-              resolved = true;
-              resolve(v);
-            }
-          };
-          if (this.process) {
-            const onExit = (code) => {
-              console.error(`[OpenCode] \u8FDB\u7A0B\u5728\u670D\u52A1\u5C31\u7EEA\u524D\u9000\u51FA, code=${code}`);
-              done(false);
-            };
-            this.process.once("exit", onExit);
-            waitForPort(portToUse, 15e3).then((tcpReady) => {
-              var _a;
-              if (!tcpReady) {
-                (_a = this.process) == null ? void 0 : _a.removeListener("exit", onExit);
-                return done(false);
-              }
-              this.waitForHealthy(15e3).then((healthy2) => {
-                var _a2;
-                (_a2 = this.process) == null ? void 0 : _a2.removeListener("exit", onExit);
-                done(healthy2);
-              });
-            });
-          } else {
-            waitForPort(portToUse, 15e3).then((tcpReady) => {
-              if (!tcpReady)
-                return done(false);
-              this.waitForHealthy(15e3).then(done);
-            });
-          }
+        const waitForService = async () => {
+          if (!await waitForPort(portToUse, 15e3))
+            return false;
+          return await this.waitForHealthy(15e3, startedProcess);
+        };
+        let onExit;
+        const earlyExit = new Promise((resolve) => {
+          onExit = () => resolve(false);
+          startedProcess.once("exit", onExit);
         });
+        let portReady;
+        try {
+          portReady = await Promise.race([waitForService(), earlyExit]);
+        } finally {
+          if (onExit)
+            startedProcess.removeListener("exit", onExit);
+        }
+        assertCurrent();
         if (!portReady) {
           throw new Error(`opencode \u670D\u52A1\u5668\u542F\u52A8\u8D85\u65F6 (port=${portToUse})\uFF0C\u8BF7\u68C0\u67E5 opencode \u662F\u5426\u6B63\u786E\u5B89\u88C5\u3002`);
         }
       }
     }
     const healthy = await this.checkHealth();
+    assertCurrent();
     if (!healthy) {
       throw new Error(`\u65E0\u6CD5\u8FDE\u63A5\u5230 opencode \u670D\u52A1\u5668 (${this.baseUrl})\uFF0C\u8BF7\u786E\u8BA4\u670D\u52A1\u6B63\u5728\u8FD0\u884C\u4E14\u8BA4\u8BC1\u4FE1\u606F\u6B63\u786E\u3002`);
     }
@@ -414,15 +411,20 @@ var OpenCodeAdapter = class {
       if (typeof (sessionData == null ? void 0 : sessionData.id) !== "string" || !sessionData.id) {
         throw new Error("OpenCode \u672A\u8FD4\u56DE\u6709\u6548\u7684\u4F1A\u8BDD ID");
       }
+      assertCurrent();
       this.sessionId = sessionData.id;
     } catch (e) {
+      assertCurrent();
       throw new Error(`\u521B\u5EFA OpenCode session \u5931\u8D25: ${openCodeErrorText(e, String(e))}`);
     }
     this.connected = true;
     await this.connectSSEAndWait();
   }
   async disconnect() {
+    var _a;
+    this.connectionAttempt++;
     this.connected = false;
+    (_a = this.settleSseHandshake) == null ? void 0 : _a.call(this, new Error("OpenCode \u8FDE\u63A5\u5DF2\u53D6\u6D88"));
     this.sseConnected = false;
     this.sessionId = null;
     this.currentWorkspace = "";
@@ -438,36 +440,29 @@ var OpenCodeAdapter = class {
     if (this.pendingResolve) {
       const resolve = this.pendingResolve;
       this.pendingResolve = null;
-      try {
-        resolve({ type: "error", message: "OpenCode \u5DF2\u65AD\u5F00\u8FDE\u63A5" });
-      } catch (e) {
-      }
+      resolve({ type: "error", message: "OpenCode \u5DF2\u65AD\u5F00\u8FDE\u63A5" });
     }
     this.waitingForReply = false;
     this.errorSent = false;
     this.stopStreaming = false;
     if (this.sseRetryTimer) {
-      clearTimeout(this.sseRetryTimer);
+      (0, import_timers.clearTimeout)(this.sseRetryTimer);
       this.sseRetryTimer = null;
     }
-    if (this.sseWaitConnectedTimer) {
-      clearTimeout(this.sseWaitConnectedTimer);
-      this.sseWaitConnectedTimer = null;
-    }
     if (this.idleDebounceTimer) {
-      clearTimeout(this.idleDebounceTimer);
+      (0, import_timers.clearTimeout)(this.idleDebounceTimer);
       this.idleDebounceTimer = null;
     }
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      (0, import_timers.clearTimeout)(this.watchdogTimer);
       this.watchdogTimer = null;
     }
     if (this.deltaSilenceTimer) {
-      clearTimeout(this.deltaSilenceTimer);
+      (0, import_timers.clearTimeout)(this.deltaSilenceTimer);
       this.deltaSilenceTimer = null;
     }
     if (this.finalMsgPollTimer) {
-      clearTimeout(this.finalMsgPollTimer);
+      (0, import_timers.clearTimeout)(this.finalMsgPollTimer);
       this.finalMsgPollTimer = null;
     }
     this.promptRequestSeq++;
@@ -478,13 +473,9 @@ var OpenCodeAdapter = class {
       }
       this.activePromptRequest = null;
     }
-    if (this.sseRequest) {
-      try {
-        this.sseRequest.destroy();
-      } catch (e) {
-      }
-      this.sseRequest = null;
-    }
+    const request2 = this.sseRequest;
+    this.sseRequest = null;
+    request2 == null ? void 0 : request2.destroy();
     if (this.process) {
       try {
         this.process.kill();
@@ -517,25 +508,25 @@ var OpenCodeAdapter = class {
     this.currentTurnToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     this.lastSseActivityAt = Date.now();
     if (this.idleDebounceTimer) {
-      clearTimeout(this.idleDebounceTimer);
+      (0, import_timers.clearTimeout)(this.idleDebounceTimer);
       this.idleDebounceTimer = null;
     }
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      (0, import_timers.clearTimeout)(this.watchdogTimer);
       this.watchdogTimer = null;
     }
     if (this.deltaSilenceTimer) {
-      clearTimeout(this.deltaSilenceTimer);
+      (0, import_timers.clearTimeout)(this.deltaSilenceTimer);
       this.deltaSilenceTimer = null;
     }
     if (this.finalMsgPollTimer) {
-      clearTimeout(this.finalMsgPollTimer);
+      (0, import_timers.clearTimeout)(this.finalMsgPollTimer);
       this.finalMsgPollTimer = null;
     }
     const armWatchdog = () => {
       if (this.watchdogTimer)
-        clearTimeout(this.watchdogTimer);
-      this.watchdogTimer = setTimeout(() => {
+        (0, import_timers.clearTimeout)(this.watchdogTimer);
+      this.watchdogTimer = (0, import_timers.setTimeout)(() => {
         this.watchdogTimer = null;
         if (!this.waitingForReply)
           return;
@@ -547,8 +538,8 @@ var OpenCodeAdapter = class {
     armWatchdog();
     const armSilenceCheck = () => {
       if (this.deltaSilenceTimer)
-        clearTimeout(this.deltaSilenceTimer);
-      this.deltaSilenceTimer = setTimeout(async () => {
+        (0, import_timers.clearTimeout)(this.deltaSilenceTimer);
+      this.deltaSilenceTimer = (0, import_timers.setTimeout)(() => {
         this.deltaSilenceTimer = null;
         if (!this.waitingForReply)
           return;
@@ -557,7 +548,7 @@ var OpenCodeAdapter = class {
         const sinceLastActivity = Date.now() - this.lastSseActivityAt;
         if (sinceLastActivity >= 88e3) {
           console.warn("[OpenCode] SSE \u6C89\u9ED8 90s\uFF0C\u5C1D\u8BD5\u4ECE /message \u62C9\u53D6\u6700\u7EC8\u56DE\u590D");
-          await this.tryFetchFinalAnswer();
+          void this.tryFetchFinalAnswer();
         }
       }, 9e4);
     };
@@ -774,15 +765,15 @@ var OpenCodeAdapter = class {
     if (this.hasPendingActions())
       return;
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      (0, import_timers.clearTimeout)(this.watchdogTimer);
       this.watchdogTimer = null;
     }
     if (this.deltaSilenceTimer) {
-      clearTimeout(this.deltaSilenceTimer);
+      (0, import_timers.clearTimeout)(this.deltaSilenceTimer);
       this.deltaSilenceTimer = null;
     }
     if (this.finalMsgPollTimer) {
-      clearTimeout(this.finalMsgPollTimer);
+      (0, import_timers.clearTimeout)(this.finalMsgPollTimer);
       this.finalMsgPollTimer = null;
     }
     if (!this.publishedFinalAnswer && this.liveAssistantText.trim()) {
@@ -800,9 +791,10 @@ var OpenCodeAdapter = class {
   async tryFetchFinalAnswer() {
     if (!this.waitingForReply || !this.sessionId)
       return;
+    const turn = this.currentTurnToken;
     try {
       const response = await this.httpRequest("GET", `/session/${this.sessionId}/message`, void 0, { timeoutMs: 15e3 });
-      if (!this.waitingForReply)
+      if (!this.waitingForReply || this.currentTurnToken !== turn)
         return;
       if (!Array.isArray(response))
         return;
@@ -833,9 +825,9 @@ var OpenCodeAdapter = class {
           this.finishCurrentReply();
         } else {
           console.warn("[OpenCode] /message \u672A\u627E\u5230 assistant \u6587\u672C\u6216\u5DE5\u5177\u8C03\u7528\uFF0C\u7EE7\u7EED\u7B49\u5F85 60s...");
-          this.finalMsgPollTimer = setTimeout(async () => {
+          this.finalMsgPollTimer = (0, import_timers.setTimeout)(() => {
             this.finalMsgPollTimer = null;
-            await this.tryFetchFinalAnswer();
+            void this.tryFetchFinalAnswer();
           }, 6e4);
         }
       }
@@ -845,53 +837,57 @@ var OpenCodeAdapter = class {
   }
   /** 连接 SSE 事件流并等待 server.connected 事件 */
   connectSSEAndWait() {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const headers = { "Accept": "text/event-stream" };
       if (this.authHeader)
         headers["Authorization"] = this.authHeader;
-      let resolved = false;
-      const done = () => {
-        if (!resolved) {
-          resolved = true;
+      const finish = (error) => {
+        if (this.settleSseHandshake !== finish)
+          return;
+        (0, import_timers.clearTimeout)(timeout);
+        this.settleSseHandshake = null;
+        if (error)
+          reject(error);
+        else
           resolve();
-        }
       };
+      const timeout = (0, import_timers.setTimeout)(finish, 5e3);
+      this.settleSseHandshake = finish;
       const scheduleRetry = (ms) => {
         if (!this.connected)
           return;
         if (this.sseRetryTimer)
-          clearTimeout(this.sseRetryTimer);
-        this.sseRetryTimer = setTimeout(doConnect, ms);
+          (0, import_timers.clearTimeout)(this.sseRetryTimer);
+        this.sseRetryTimer = (0, import_timers.setTimeout)(doConnect, ms);
       };
       const doConnect = () => {
         if (!this.connected || !this.sessionId)
           return;
         if (this.sseRetryTimer) {
-          clearTimeout(this.sseRetryTimer);
+          (0, import_timers.clearTimeout)(this.sseRetryTimer);
           this.sseRetryTimer = null;
         }
-        if (this.sseRequest) {
-          try {
-            this.sseRequest.destroy();
-          } catch (e) {
+        const previousRequest = this.sseRequest;
+        this.sseRequest = null;
+        previousRequest == null ? void 0 : previousRequest.destroy();
+        const isCurrent = () => this.connected && this.sseRequest === request2;
+        const request2 = http.get(`${this.baseUrl}/global/event`, { headers, timeout: 0 }, (res) => {
+          if (!isCurrent()) {
+            res.destroy();
+            return;
           }
-          this.sseRequest = null;
-        }
-        this.sseRequest = http.get(`${this.baseUrl}/global/event`, { headers, timeout: 0 }, (res) => {
-          var _a;
           if (res.statusCode !== 200) {
             console.error(`[OpenCode] SSE \u8FDE\u63A5\u5931\u8D25: HTTP ${res.statusCode}`);
-            try {
-              (_a = res.resume) == null ? void 0 : _a.call(res);
-            } catch (e) {
-            }
+            res.resume();
             scheduleRetry(3e3);
             return;
           }
           let buffer = "";
           res.setEncoding("utf8");
           res.on("data", (chunk) => {
-            var _a2;
+            var _a;
+            if (!isCurrent())
+              return;
             buffer += chunk;
             const { frames, remainder } = this.splitSSEFrames(buffer);
             buffer = remainder;
@@ -905,37 +901,37 @@ var OpenCodeAdapter = class {
               }
               if (!payload)
                 continue;
-              if (!this.sseConnected && ((_a2 = jsonObject(payload.payload)) == null ? void 0 : _a2.type) === "server.connected") {
+              if (!this.sseConnected && ((_a = jsonObject(payload.payload)) == null ? void 0 : _a.type) === "server.connected") {
                 this.sseConnected = true;
-                done();
+                finish();
               }
               this.handleSSEEvent(payload);
             }
           });
           res.on("end", () => {
+            if (!isCurrent())
+              return;
             this.sseConnected = false;
             scheduleRetry(2e3);
           });
           res.on("error", (e) => {
-            if (!this.connected)
+            if (!isCurrent())
               return;
             console.error("[OpenCode] SSE \u9519\u8BEF:", e.message);
             this.sseConnected = false;
             scheduleRetry(3e3);
           });
         });
-        this.sseRequest.on("error", (e) => {
+        this.sseRequest = request2;
+        request2.on("error", (e) => {
+          if (!isCurrent())
+            return;
+          this.sseConnected = false;
           console.error("[OpenCode] SSE \u8BF7\u6C42\u9519\u8BEF:", e.message);
           scheduleRetry(3e3);
         });
       };
       doConnect();
-      if (this.sseWaitConnectedTimer)
-        clearTimeout(this.sseWaitConnectedTimer);
-      this.sseWaitConnectedTimer = setTimeout(() => {
-        this.sseWaitConnectedTimer = null;
-        done();
-      }, 5e3);
     });
   }
   /**
@@ -950,19 +946,19 @@ var OpenCodeAdapter = class {
     this.errorSent = true;
     this.pendingActions.clear();
     if (this.idleDebounceTimer) {
-      clearTimeout(this.idleDebounceTimer);
+      (0, import_timers.clearTimeout)(this.idleDebounceTimer);
       this.idleDebounceTimer = null;
     }
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      (0, import_timers.clearTimeout)(this.watchdogTimer);
       this.watchdogTimer = null;
     }
     if (this.deltaSilenceTimer) {
-      clearTimeout(this.deltaSilenceTimer);
+      (0, import_timers.clearTimeout)(this.deltaSilenceTimer);
       this.deltaSilenceTimer = null;
     }
     if (this.finalMsgPollTimer) {
-      clearTimeout(this.finalMsgPollTimer);
+      (0, import_timers.clearTimeout)(this.finalMsgPollTimer);
       this.finalMsgPollTimer = null;
     }
     this.promptRequestSeq++;
@@ -1134,8 +1130,8 @@ var OpenCodeAdapter = class {
         if (this.hasPendingActions())
           return;
         if (this.idleDebounceTimer)
-          clearTimeout(this.idleDebounceTimer);
-        this.idleDebounceTimer = setTimeout(() => {
+          (0, import_timers.clearTimeout)(this.idleDebounceTimer);
+        this.idleDebounceTimer = (0, import_timers.setTimeout)(() => {
           this.idleDebounceTimer = null;
           if (!this.waitingForReply)
             return;
@@ -1349,7 +1345,7 @@ var OpenCodeAdapter = class {
         if ((status == null ? void 0 : status.type) === "busy") {
           touchActivity();
           if (this.idleDebounceTimer) {
-            clearTimeout(this.idleDebounceTimer);
+            (0, import_timers.clearTimeout)(this.idleDebounceTimer);
             this.idleDebounceTimer = null;
           }
         } else if ((status == null ? void 0 : status.type) === "idle" && this.waitingForReply) {
@@ -1373,21 +1369,20 @@ var OpenCodeAdapter = class {
     this.currentTurnToken = "";
     this.armSilenceCheck = null;
     this.pendingMessages = [];
-    this.pendingResolve = null;
     if (this.idleDebounceTimer) {
-      clearTimeout(this.idleDebounceTimer);
+      (0, import_timers.clearTimeout)(this.idleDebounceTimer);
       this.idleDebounceTimer = null;
     }
     if (this.watchdogTimer) {
-      clearTimeout(this.watchdogTimer);
+      (0, import_timers.clearTimeout)(this.watchdogTimer);
       this.watchdogTimer = null;
     }
     if (this.deltaSilenceTimer) {
-      clearTimeout(this.deltaSilenceTimer);
+      (0, import_timers.clearTimeout)(this.deltaSilenceTimer);
       this.deltaSilenceTimer = null;
     }
     if (this.finalMsgPollTimer) {
-      clearTimeout(this.finalMsgPollTimer);
+      (0, import_timers.clearTimeout)(this.finalMsgPollTimer);
       this.finalMsgPollTimer = null;
     }
     this.promptRequestSeq++;
@@ -1502,19 +1497,16 @@ var OpenCodeAdapter = class {
     }
   }
   /** 等待 opencode 服务器变为健康状态 */
-  waitForHealthy(timeoutMs) {
-    return new Promise((resolve) => {
-      const start = Date.now();
-      const poll = async () => {
-        if (Date.now() - start >= timeoutMs)
-          return resolve(false);
-        const ok = await this.checkHealth();
-        if (ok)
-          return resolve(true);
-        setTimeout(poll, 500);
-      };
-      poll();
-    });
+  async waitForHealthy(timeoutMs, startedProcess) {
+    const deadline = Date.now() + timeoutMs;
+    while (this.process === startedProcess && startedProcess.exitCode === null && startedProcess.signalCode === null && Date.now() < deadline) {
+      if (await this.checkHealth())
+        return true;
+      await new Promise((resolve) => {
+        (0, import_timers.setTimeout)(resolve, 500);
+      });
+    }
+    return false;
   }
   async startProcess(port, cwd) {
     return new Promise((resolve) => {
@@ -1530,7 +1522,7 @@ var OpenCodeAdapter = class {
           resolve(false);
         });
         this.process.on("spawn", () => resolve(true));
-        setTimeout(() => resolve(true), 2e3);
+        (0, import_timers.setTimeout)(() => resolve(true), 2e3);
       } catch (e) {
         console.error("[OpenCode] startProcess \u5F02\u5E38:", e);
         resolve(false);
@@ -1597,23 +1589,13 @@ var ChatSessionRenderer = class {
       button.addClass(`iflow-action-btn-${action.type || "default"}`);
       if (action.description)
         button.title = action.description;
-      button.addEventListener("click", async (event) => {
-        var _a, _b;
+      button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (button.disabled)
           return;
-        try {
-          if (action.custom) {
-            await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, action));
-            return;
-          }
-          this.setActionButtonsBusy(key, action.label || "\u5904\u7406\u4E2D...");
-          await ((_b = this.onAction) == null ? void 0 : _b.call(this, request2, action));
-        } catch (e) {
-          new import_obsidian.Notice((e == null ? void 0 : e.message) || "\u5904\u7406\u9009\u62E9\u5931\u8D25");
-          this.setActionButtonsEnabled(key);
-        }
+        const busyLabel = action.custom ? void 0 : action.label || "\u5904\u7406\u4E2D...";
+        void this.submitAction(request2, action, key, "\u5904\u7406\u9009\u62E9\u5931\u8D25", busyLabel);
       });
       buttons.push(button);
     }
@@ -1697,7 +1679,7 @@ var ChatSessionRenderer = class {
             answers[questionIndex] = next ? [next] : [];
             syncPicked();
           }
-          textarea.setCssStyles({ height: "0px" });
+          textarea.style.removeProperty("height");
           textarea.setCssStyles({ height: `${textarea.scrollHeight}px` });
         });
       }
@@ -1706,25 +1688,21 @@ var ChatSessionRenderer = class {
     const rejectButton = actionsEl.createEl("button", { text: "\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54" });
     rejectButton.addClass("iflow-action-btn");
     rejectButton.addClass("iflow-action-btn-danger");
-    rejectButton.addEventListener("click", async (event) => {
-      var _a;
+    rejectButton.addEventListener("click", (event) => {
       event.preventDefault();
       if (rejectButton.disabled)
         return;
-      try {
-        this.setActionButtonsBusy(key, "\u53D6\u6D88\u4E2D...");
-        await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, { label: "\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54", reply: "question_reject", type: "danger" }));
-      } catch (e) {
-        new import_obsidian.Notice((e == null ? void 0 : e.message) || "\u53D6\u6D88\u5931\u8D25");
-        this.setActionButtonsEnabled(key);
-      }
+      void this.submitAction(request2, {
+        label: "\u53D6\u6D88/\u5148\u4E0D\u56DE\u7B54",
+        reply: "question_reject",
+        type: "danger"
+      }, key, "\u53D6\u6D88\u5931\u8D25", "\u53D6\u6D88\u4E2D...");
     });
     buttons.push(rejectButton);
     const submitButton = actionsEl.createEl("button", { text: "\u63D0\u4EA4\u56DE\u7B54" });
     submitButton.addClass("iflow-action-btn");
     submitButton.addClass("iflow-action-btn-primary");
-    submitButton.addEventListener("click", async (event) => {
-      var _a;
+    submitButton.addEventListener("click", (event) => {
       event.preventDefault();
       if (submitButton.disabled)
         return;
@@ -1733,20 +1711,26 @@ var ChatSessionRenderer = class {
         new import_obsidian.Notice("\u8BF7\u5148\u9009\u62E9\u6216\u8F93\u5165\u81F3\u5C11\u4E00\u4E2A\u56DE\u7B54");
         return;
       }
-      try {
-        this.setActionButtonsBusy(key, "\u63D0\u4EA4\u4E2D...");
-        await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, {
-          label: "\u63D0\u4EA4\u56DE\u7B54",
-          reply: "question_answer",
-          answers: normalized,
-          type: "primary"
-        }));
-      } catch (e) {
-        new import_obsidian.Notice((e == null ? void 0 : e.message) || "\u63D0\u4EA4\u56DE\u7B54\u5931\u8D25");
-        this.setActionButtonsEnabled(key);
-      }
+      void this.submitAction(request2, {
+        label: "\u63D0\u4EA4\u56DE\u7B54",
+        reply: "question_answer",
+        answers: normalized,
+        type: "primary"
+      }, key, "\u63D0\u4EA4\u56DE\u7B54\u5931\u8D25", "\u63D0\u4EA4\u4E2D...");
     });
     buttons.push(submitButton);
+  }
+  async submitAction(request2, action, key, failureMessage, busyLabel) {
+    var _a, _b;
+    try {
+      if (busyLabel)
+        this.setActionButtonsBusy(key, busyLabel);
+      await ((_a = this.onAction) == null ? void 0 : _a.call(this, request2, action));
+    } catch (error) {
+      const message = (_b = jsonObject(error)) == null ? void 0 : _b.message;
+      this.setActionButtonsEnabled(key);
+      new import_obsidian.Notice(typeof message === "string" && message ? message : failureMessage);
+    }
   }
   questionItems(request2) {
     var _a;
@@ -2935,11 +2919,13 @@ var TemplateSuggestModal = class extends import_obsidian2.SuggestModal {
     return results;
   }
   renderSuggestion(file, el) {
-    el.createEl("div", { text: file.basename });
+    el.createDiv({ text: file.basename });
     el.createEl("small", { text: file.path });
   }
   onChooseSuggestion(file, evt) {
-    this.onChoose(file);
+    void this.onChoose(file).catch(() => {
+      new import_obsidian2.Notice("\u65E0\u6CD5\u8BFB\u53D6\u6A21\u677F");
+    });
   }
 };
 var FolderSuggestModal = class extends import_obsidian2.SuggestModal {
@@ -2949,11 +2935,11 @@ var FolderSuggestModal = class extends import_obsidian2.SuggestModal {
   }
   getSuggestions(query) {
     const files = this.app.vault.getAllLoadedFiles();
-    const folders = files.filter((f) => f instanceof import_obsidian2.TFolder);
+    const folders = files.filter((file) => file instanceof import_obsidian2.TFolder);
     return folders.filter((f) => f.path.toLowerCase().includes(query.toLowerCase()));
   }
   renderSuggestion(folder, el) {
-    el.createEl("div", { text: folder.name });
+    el.createDiv({ text: folder.name });
     el.createEl("small", { text: folder.path });
   }
   onChooseSuggestion(folder, evt) {
@@ -2978,7 +2964,7 @@ var FileSuggestModal = class extends import_obsidian2.SuggestModal {
     }).slice(0, 20);
   }
   renderSuggestion(file, el) {
-    el.createEl("div", { text: file.basename });
+    el.createDiv({ text: file.basename });
     el.createEl("small", { text: file.path });
   }
   onChooseSuggestion(file, evt) {
@@ -3003,14 +2989,17 @@ var ModelSuggestModal = class extends import_obsidian2.SuggestModal {
   renderSuggestion(item, el) {
     if (item.provider) {
       const container = el.createDiv({ cls: "iflow-model-suggest-item" });
-      container.createEl("div", { text: item.provider, cls: "iflow-model-suggest-provider" });
-      container.createEl("div", { text: item.value.includes("/") ? item.value.split("/").slice(1).join("/") : item.label });
+      container.createDiv({ text: item.provider, cls: "iflow-model-suggest-provider" });
+      container.createDiv({ text: item.value.includes("/") ? item.value.split("/").slice(1).join("/") : item.label });
     } else {
-      el.createEl("div", { text: item.label });
+      el.createDiv({ text: item.label });
     }
   }
   onChooseSuggestion(item, evt) {
-    this.onChoose(item);
+    var _a;
+    void ((_a = this.onChoose(item)) == null ? void 0 : _a.catch(() => {
+      new import_obsidian2.Notice("\u65E0\u6CD5\u4FDD\u5B58\u6A21\u578B\u9009\u62E9");
+    }));
   }
 };
 var SlashCommandSuggestModal = class extends import_obsidian2.SuggestModal {
@@ -3031,8 +3020,8 @@ var SlashCommandSuggestModal = class extends import_obsidian2.SuggestModal {
   }
   renderSuggestion(item, el) {
     const row = el.createDiv({ cls: "iflow-slash-command-item" });
-    row.createEl("div", { text: item.command, cls: "iflow-slash-command-command" });
-    row.createEl("div", { text: item.description, cls: "iflow-slash-command-desc" });
+    row.createDiv({ text: item.command, cls: "iflow-slash-command-command" });
+    row.createDiv({ text: item.description, cls: "iflow-slash-command-desc" });
   }
   onChooseSuggestion(item, evt) {
     this.onChoose(item);
@@ -3061,7 +3050,9 @@ var PromptModal = class extends import_obsidian2.Modal {
         e.preventDefault();
         this.promptText = textArea.getValue();
         this.close();
-        this.plugin.askCLI(this.promptText, this.editor, this.mode);
+        void this.plugin.askCLI(this.promptText, this.editor, this.mode).catch(() => {
+          new import_obsidian2.Notice("\u751F\u6210\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        });
       }
     });
     textArea.inputEl.addEventListener("input", (e) => {
@@ -3082,7 +3073,9 @@ var PromptModal = class extends import_obsidian2.Modal {
     new import_obsidian2.ButtonComponent(buttonContainer).setButtonText("\u53D6\u6D88").onClick(() => this.close());
     new import_obsidian2.ButtonComponent(buttonContainer).setButtonText("\u751F\u6210").setCta().onClick(() => {
       this.close();
-      this.plugin.askCLI(this.promptText, this.editor, this.mode);
+      void this.plugin.askCLI(this.promptText, this.editor, this.mode).catch(() => {
+        new import_obsidian2.Notice("\u751F\u6210\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+      });
     });
     textArea.inputEl.focus();
   }
@@ -3159,7 +3152,7 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
       writeModeTargetEl.addClass("iflow-task-field-hidden");
     }
     const modelSetting = new import_obsidian2.Setting(contentEl).setName("\u6267\u884C\u6A21\u578B").setDesc("\u7559\u7A7A\u5219\u4F7F\u7528\u63D2\u4EF6\u9ED8\u8BA4\u6A21\u578B");
-    const modelDisplay = modelSetting.controlEl.createEl("span", { cls: "iflow-setting-model-display iflow-task-model-display" });
+    const modelDisplay = modelSetting.controlEl.createSpan({ cls: "iflow-setting-model-display iflow-task-model-display" });
     const refreshModelDisplay = () => {
       modelDisplay.textContent = model || "\u9ED8\u8BA4\uFF08\u8DDF\u968F\u5168\u5C40\u6A21\u578B\uFF09";
       modelDisplay.title = model || "\u9ED8\u8BA4\uFF08\u8DDF\u968F\u5168\u5C40\u6A21\u578B\uFF09";
@@ -3191,7 +3184,6 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
     new import_obsidian2.Setting(contentEl).setName("\u81EA\u5B9A\u4E49\u6587\u4EF6\u540D\uFF08\u53EF\u9009\uFF09").setDesc("\u652F\u6301\u53D8\u91CF\uFF1A{YYYY} {MM} {DD} {HH} {mm}").addText((text) => text.setPlaceholder("\u4F8B\u5982\uFF1Asummary-{YYYY}-{MM}-{DD}").setValue(customFileName).onChange((value) => {
       customFileName = value;
     }));
-    let scheduleTypeSetting = null;
     let dailySettingEl = null;
     let onceSettingEl = null;
     new import_obsidian2.Setting(contentEl).setName("\u6267\u884C\u7C7B\u578B").addDropdown((dropdown) => {
@@ -3205,7 +3197,6 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
         if (onceSettingEl)
           onceSettingEl.toggleClass("iflow-task-field-hidden", scheduleType !== "once");
       });
-      scheduleTypeSetting = dropdown.selectEl;
     });
     const dailySetting = new import_obsidian2.Setting(contentEl).setName("\u6BCF\u65E5\u65F6\u95F4").addText((text) => {
       text.inputEl.type = "time";
@@ -3285,8 +3276,14 @@ var ScheduledTaskModal = class extends import_obsidian2.Modal {
       const nextTask = buildTask();
       if (!nextTask)
         return;
-      this.onSubmit(nextTask);
-      this.close();
+      saveButton.disabled = true;
+      void this.onSubmit(nextTask).then(
+        () => this.close(),
+        () => {
+          saveButton.disabled = false;
+          new import_obsidian2.Notice("\u5B9A\u65F6\u4EFB\u52A1\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        }
+      );
     };
   }
   onClose() {
@@ -3377,34 +3374,10 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
         }).open();
       }
     });
-    this.inputTextArea.addEventListener("paste", async (e) => {
-      const clipboardData = e.clipboardData;
-      if (!clipboardData)
-        return;
-      const imageItems = Array.from(clipboardData.items || []).filter((item) => item.kind === "file" && item.type.startsWith("image/"));
-      if (imageItems.length === 0)
-        return;
-      e.preventDefault();
-      const insertedLinks = [];
-      for (const item of imageItems) {
-        const file = item.getAsFile();
-        if (!file)
-          continue;
-        try {
-          const link = await this.savePastedImageAndBuildLink(file);
-          insertedLinks.push(link);
-        } catch (error) {
-          console.error("[paste-image] \u4FDD\u5B58\u7C98\u8D34\u56FE\u7247\u5931\u8D25:", error);
-        }
-      }
-      if (insertedLinks.length === 0) {
+    this.inputTextArea.addEventListener("paste", (event) => {
+      void this.pasteImages(event).catch(() => {
         new import_obsidian2.Notice("\u56FE\u7247\u7C98\u8D34\u5931\u8D25");
-        return;
-      }
-      const prefix = this.shouldInsertWithLeadingNewline() ? "\n" : "";
-      const suffix = this.shouldInsertWithTrailingNewline() ? "\n" : "";
-      this.insertAtCursor(`${prefix}${insertedLinks.join("\n")}${suffix}`, 0);
-      new import_obsidian2.Notice(`\u5DF2\u63D2\u5165 ${insertedLinks.length} \u5F20\u56FE\u7247`);
+      });
     });
     this.inputTextArea.addEventListener("dragover", (e) => {
       e.preventDefault();
@@ -3414,7 +3387,7 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
       e.preventDefault();
       this.inputTextArea.removeClass("iflow-drag-over");
     });
-    this.inputTextArea.addEventListener("drop", async (e) => {
+    this.inputTextArea.addEventListener("drop", (e) => {
       var _a2;
       e.preventDefault();
       this.inputTextArea.removeClass("iflow-drag-over");
@@ -3443,8 +3416,11 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
       this.openModelSelect();
     });
     new import_obsidian2.ButtonComponent(toolbar).setIcon("refresh-cw").setTooltip("\u5237\u65B0\u6A21\u578B\u5217\u8868 (\u4ECE\u540E\u7AEF\u52A8\u6001\u83B7\u53D6)").onClick(() => this.refreshModels());
-    if (!((_a = dynamicModelsCache["opencode"]) == null ? void 0 : _a.length))
-      this.refreshModels(true);
+    if (!((_a = dynamicModelsCache["opencode"]) == null ? void 0 : _a.length)) {
+      void this.refreshModels(true).catch(() => {
+        new import_obsidian2.Notice("\u65E0\u6CD5\u5237\u65B0 OpenCode \u6A21\u578B\u5217\u8868");
+      });
+    }
     new import_obsidian2.ButtonComponent(toolbar).setButtonText("\u538B\u7F29").setTooltip("\u538B\u7F29\u6574\u7406\u5BF9\u8BDD").onClick(() => this.compressChat());
     new import_obsidian2.ButtonComponent(toolbar).setButtonText("\u65B0\u5EFA").setTooltip("\u65B0\u5EFA\u5BF9\u8BDD (\u6E05\u9664\u5185\u5BB9)").onClick(() => this.clearChat());
     new import_obsidian2.ButtonComponent(toolbar).setButtonText("\u7ED3\u675F").setTooltip("\u7ED3\u675F\u5F53\u524D\u751F\u6210").onClick(() => this.requestStopGeneration());
@@ -3456,6 +3432,34 @@ var IFlowChatView = class extends import_obsidian2.ItemView {
         new import_obsidian2.Notice("\u53D1\u9001\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
       });
     };
+  }
+  async pasteImages(event) {
+    const clipboardData = event.clipboardData;
+    if (!clipboardData)
+      return;
+    const imageItems = Array.from(clipboardData.items || []).filter((item) => item.kind === "file" && item.type.startsWith("image/"));
+    if (imageItems.length === 0)
+      return;
+    event.preventDefault();
+    const insertedLinks = [];
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file)
+        continue;
+      try {
+        const link = await this.savePastedImageAndBuildLink(file);
+        insertedLinks.push(link);
+      } catch (e) {
+      }
+    }
+    if (insertedLinks.length === 0) {
+      new import_obsidian2.Notice("\u56FE\u7247\u7C98\u8D34\u5931\u8D25");
+      return;
+    }
+    const prefix = this.shouldInsertWithLeadingNewline() ? "\n" : "";
+    const suffix = this.shouldInsertWithTrailingNewline() ? "\n" : "";
+    this.insertAtCursor(`${prefix}${insertedLinks.join("\n")}${suffix}`, 0);
+    new import_obsidian2.Notice(`\u5DF2\u63D2\u5165 ${insertedLinks.length} \u5F20\u56FE\u7247`);
   }
   /**
    * 更新模型选择按钮的显示文本（切换后端/选择模型后需调用）
@@ -4384,6 +4388,8 @@ var IFlowPlugin = class extends import_obsidian2.Plugin {
     this.adapter = null;
     this.lastActiveMarkdownFile = null;
     this.cliCwd = null;
+    this.connectionRevision = 0;
+    this.disconnectingAdapter = null;
     this.automationActivated = false;
     this.scheduledTaskTimers = /* @__PURE__ */ new Map();
     /** 防止同一个任务被定时器和“立即执行”按钮重复并发执行。 */
@@ -4775,7 +4781,7 @@ ${prompt}`;
         return;
       const fullDelay = Math.max(0, nextRun.getTime() - Date.now());
       const maxTimerDelay = 2147483647;
-      const delay = Math.min(fullDelay, maxTimerDelay);
+      const delay2 = Math.min(fullDelay, maxTimerDelay);
       const timer = window.setTimeout(async () => {
         if (!this.hasAutomationLicense())
           return;
@@ -4797,7 +4803,7 @@ ${prompt}`;
             scheduleNext();
           }
         }
-      }, delay);
+      }, delay2);
       this.scheduledTaskTimers.set(task.id, timer);
     };
     scheduleNext();
@@ -4829,6 +4835,27 @@ ${prompt}`;
       await this.runScheduledTask(task, runAt);
     } finally {
       this.runningScheduledTaskIds.delete(task.id);
+    }
+  }
+  async saveScheduledTask(task) {
+    const tasks = this.settings.scheduledTasks;
+    const index = tasks.findIndex((item) => item.id === task.id);
+    const previous = tasks[index];
+    if (previous)
+      tasks[index] = task;
+    else
+      tasks.push(task);
+    try {
+      await this.saveSettings();
+    } catch (error) {
+      const currentIndex = tasks.indexOf(task);
+      if (currentIndex >= 0) {
+        if (previous)
+          tasks[currentIndex] = previous;
+        else
+          tasks.splice(currentIndex, 1);
+      }
+      throw error;
     }
   }
   async removeScheduledTask(taskId) {
@@ -5329,7 +5356,9 @@ ${body}`;
       (leaf) => new IFlowChatView(leaf, this)
     );
     this.addRibbonIcon("book-open", "\u7B14\u8BB0\u52A9\u7406", () => {
-      this.activateView();
+      void this.activateView().catch(() => {
+        new import_obsidian2.Notice("\u65E0\u6CD5\u6253\u5F00 OpenCode \u804A\u5929\u89C6\u56FE");
+      });
     });
     this.statusBarItem = this.addStatusBarItem();
     this.updateStatusBar(`${this.getBackendDisplayName()}: \u672A\u8FDE\u63A5`);
@@ -5351,7 +5380,9 @@ ${body}`;
       id: "reconnect-iflow",
       name: "\u91CD\u8FDE AI",
       callback: () => {
-        this.connectToCLI();
+        void this.connectToCLI().catch(() => {
+          new import_obsidian2.Notice("\u65E0\u6CD5\u91CD\u65B0\u8FDE\u63A5 OpenCode");
+        });
       }
     });
     this.addSettingTab(new IFlowSettingTab(this.app, this));
@@ -5418,10 +5449,11 @@ ${body}`;
   }
   async connectToCLI(cwdOverride) {
     var _a;
-    if (this.adapter) {
-      await this.disconnectCLI();
-    }
+    const revision = ++this.connectionRevision;
     const backendName = this.getBackendDisplayName();
+    await this.releaseAdapter();
+    if (revision !== this.connectionRevision)
+      return;
     new import_obsidian2.Notice(`\u6B63\u5728\u5C1D\u8BD5\u8FDE\u63A5 ${backendName}...`);
     try {
       const fileSystem = vaultFileSystem(this.app);
@@ -5430,25 +5462,46 @@ ${body}`;
       const vaultPath = fileSystem.getBasePath();
       const parent = (_a = this.getContextFile()) == null ? void 0 : _a.parent;
       const cwdToUse = cwdOverride || (parent ? fileSystem.getFullPath(parent.path) : "") || vaultPath;
-      this.adapter = new OpenCodeAdapter(this.settings, vaultPath);
+      const adapter = new OpenCodeAdapter(this.settings, vaultPath);
+      this.adapter = adapter;
       this.cliCwd = cwdToUse;
-      await this.adapter.connect(cwdToUse);
+      await adapter.connect(cwdToUse);
+      if (revision !== this.connectionRevision || this.adapter !== adapter)
+        return;
       this.updateStatusBar(`${backendName}: \u5DF2\u8FDE\u63A5`);
       new import_obsidian2.Notice(`\u6210\u529F\u8FDE\u63A5\u5230 ${backendName}!`);
     } catch (error) {
+      if (revision !== this.connectionRevision)
+        return;
+      await this.releaseAdapter();
+      if (revision !== this.connectionRevision)
+        return;
       console.error(`[${backendName}] \u8FDE\u63A5\u5931\u8D25:`, error);
       this.updateStatusBar(`${backendName}: \u8FDE\u63A5\u9519\u8BEF`);
       new import_obsidian2.Notice("\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E\u3002", 5e3);
-      this.adapter = null;
     }
   }
-  async disconnectCLI() {
-    if (this.adapter) {
-      try {
-        await this.adapter.disconnect();
-      } catch (e) {
-      }
+  /** 先撤下旧连接，再等待同一次清理完成。并发重连只允许最新请求更新界面。 */
+  async releaseAdapter() {
+    const adapter = this.adapter;
+    if (adapter) {
       this.adapter = null;
+      this.cliCwd = null;
+      this.disconnectingAdapter = adapter.disconnect().catch(() => {
+        console.warn("[OpenCode] \u65AD\u5F00\u8FDE\u63A5\u5931\u8D25");
+      });
+    }
+    const pending = this.disconnectingAdapter;
+    if (!pending)
+      return;
+    await pending;
+    if (this.disconnectingAdapter === pending)
+      this.disconnectingAdapter = null;
+  }
+  async disconnectCLI() {
+    const revision = ++this.connectionRevision;
+    await this.releaseAdapter();
+    if (revision === this.connectionRevision) {
       this.updateStatusBar(`${this.getBackendDisplayName()}: \u672A\u8FDE\u63A5`);
     }
   }
@@ -5585,7 +5638,9 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
       new FolderSuggestModal(this.plugin.app, (folder) => {
         const next = parseTemplatePaths2([...this.plugin.getTemplateFolderPaths(), folder.path]);
         this.plugin.settings.templatePaths = next;
-        this.plugin.saveSettings();
+        void this.plugin.saveSettings().catch(() => {
+          new import_obsidian2.Notice("\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        });
         templatePathsText.setValue(next.join("\n"));
       }).open();
     }));
@@ -5601,7 +5656,9 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
       new FolderSuggestModal(this.plugin.app, (folder) => {
         const next = parseTemplatePaths2([...this.plugin.getSkillsFolderPaths(), folder.path]);
         this.plugin.settings.skillsPaths = next;
-        this.plugin.saveSettings();
+        void this.plugin.saveSettings().catch(() => {
+          new import_obsidian2.Notice("\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        });
         skillsPathsText.setValue(next.join("\n"));
       }).open();
     }));
@@ -5617,7 +5674,9 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
       new FolderSuggestModal(this.plugin.app, (folder) => {
         const next = parseTemplatePaths2([...this.plugin.settings.lskillPaths || [], folder.path]);
         this.plugin.settings.lskillPaths = next;
-        this.plugin.saveSettings();
+        void this.plugin.saveSettings().catch(() => {
+          new import_obsidian2.Notice("\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        });
         extraSkillsPathsText.setValue(next.join("\n"));
       }).open();
     }));
@@ -5632,7 +5691,9 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     }).addButton((button) => button.setButtonText("\u641C\u7D22").onClick(() => {
       new FolderSuggestModal(this.plugin.app, (folder) => {
         this.plugin.settings.chatSavePath = folder.path;
-        this.plugin.saveSettings();
+        void this.plugin.saveSettings().catch(() => {
+          new import_obsidian2.Notice("\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5");
+        });
         chatSavePathText.setValue(folder.path);
       }).open();
     }));
@@ -5656,9 +5717,7 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
         }
       });
     });
-    let weightsTextArea;
     new import_obsidian2.Setting(containerEl).setName("\u5173\u952E\u8BCD\u6743\u91CD").setDesc("\u6BCF\u884C\u4E00\u4E2A\uFF1A\u5173\u952E\u8BCD=\u6743\u91CD\uFF08\u9ED8\u8BA4\u6743\u91CD 1.0\uFF09\u3002\u793A\u4F8B\uFF1A\u6536\u76CA\u7387=2").addTextArea((text) => {
-      weightsTextArea = text;
       text.setValue(formatKeywordWeightsText(this.plugin.settings.searchKeywordWeights)).onChange(async (value) => {
         this.plugin.settings.searchKeywordWeights = parseKeywordWeightsText(value);
         await this.plugin.saveSettings();
@@ -5728,13 +5787,7 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
       }));
       new import_obsidian2.Setting(containerEl).setName("\u65B0\u589E\u5B9A\u65F6\u4EFB\u52A1").addButton((button) => button.setButtonText("\u65B0\u589E").onClick(() => {
         new ScheduledTaskModal(this.app, this.plugin, null, async (task) => {
-          const idx = this.plugin.settings.scheduledTasks.findIndex((t) => t.id === task.id);
-          if (idx >= 0) {
-            this.plugin.settings.scheduledTasks[idx] = task;
-          } else {
-            this.plugin.settings.scheduledTasks.push(task);
-          }
-          await this.plugin.saveSettings();
+          await this.plugin.saveScheduledTask(task);
           this.plugin.startScheduledTask(task);
           this.display();
           new import_obsidian2.Notice("\u5B9A\u65F6\u4EFB\u52A1\u5DF2\u4FDD\u5B58");
@@ -5742,7 +5795,7 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
       }));
     }
     if (this.plugin.settings.scheduledTasks.length === 0) {
-      containerEl.createEl("div", { text: "\u6682\u65E0\u5B9A\u65F6\u4EFB\u52A1" });
+      containerEl.createDiv({ text: "\u6682\u65E0\u5B9A\u65F6\u4EFB\u52A1" });
     } else {
       for (const task of this.plugin.settings.scheduledTasks) {
         const scheduleLabel = task.scheduleType === "once" ? `\u5355\u6B21 ${task.dateTime || "-"}` : `\u6BCF\u5929 ${task.schedule || "-"}`;
@@ -5765,13 +5818,7 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
           }
         })).addButton((button) => button.setButtonText("\u7F16\u8F91").onClick(() => {
           new ScheduledTaskModal(this.app, this.plugin, task, async (updated) => {
-            const idx = this.plugin.settings.scheduledTasks.findIndex((t) => t.id === updated.id);
-            if (idx >= 0) {
-              this.plugin.settings.scheduledTasks[idx] = updated;
-            } else {
-              this.plugin.settings.scheduledTasks.push(updated);
-            }
-            await this.plugin.saveSettings();
+            await this.plugin.saveScheduledTask(updated);
             this.plugin.startScheduledTask(updated);
             this.display();
             new import_obsidian2.Notice("\u5B9A\u65F6\u4EFB\u52A1\u5DF2\u66F4\u65B0");

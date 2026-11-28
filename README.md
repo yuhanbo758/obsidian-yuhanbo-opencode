@@ -4,6 +4,8 @@
 
 Use OpenCode in the Obsidian desktop sidebar to chat with vault notes, search, rewrite selections, and save conversations as Markdown. The free edition includes these features. An optional activation code unlocks scheduled tasks, bulk note updates, and SMTP notifications.
 
+To purchase an automation activation code, use the [Program Shop](https://shop.sanrenjz.com/obsidian/obsidian%E6%8F%92%E4%BB%B6-yuhanbo-opencode) link in the plugin's automation settings. The shop opens in your browser when you follow the link. Activation is verified locally.
+
 ## Installation
 
 1. Install and configure OpenCode on your desktop.
@@ -36,7 +38,7 @@ The plugin connects to a local OpenCode service using HTTP and SSE. The selected
 | Markdown 模板、本地 Skills、全文搜索、编辑器插入与替换 | 按 WikiLink、Dataview 或 DataviewJS 查询结果批量追加或覆盖笔记 |
 | 查看已有任务及笔记产物 | SMTP 任务邮件及测试邮件 |
 
-在「设置 → yuhanbo-opencode → 自动化授权」粘贴由维护者签发的激活码并点击「激活」。插件在本地用 Ed25519 公钥验签，无需账户或授权服务器。激活码保存在当前笔记库的插件设置中。移除激活会暂停定时器并保留任务和产物。当前签发格式没有到期时间、设备绑定或在线撤销。
+在「设置 → yuhanbo-opencode → 自动化与定时任务 → 自动化授权」点击「前往程序小店获取激活码」，即可在浏览器打开商品页购买。取得激活码后，回到同一位置粘贴并点击「激活」。插件在本地用 Ed25519 公钥验签，无需账户或授权服务器。激活码保存在当前笔记库的插件设置中。移除激活会暂停定时器并保留任务和产物。当前签发格式没有到期时间、设备绑定或在线撤销。
 
 定时任务要求 Obsidian 和插件保持运行。已错过的单次任务可手动重新执行。自动处理权限默认关闭。启用后，插件可以为后台任务选择 OpenCode 的允许权限。建议先用示例笔记核对目标文件和写入模式。
 

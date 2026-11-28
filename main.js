@@ -5749,6 +5749,11 @@ var IFlowSettingTab = class extends import_obsidian2.PluginSettingTab {
     const licenseSetting = new import_obsidian2.Setting(containerEl).setName("\u81EA\u52A8\u5316\u6388\u6743").setDesc(automationActive ? "\u5DF2\u6FC0\u6D3B\u3002\u6B64\u7535\u8111\u4E0A\u7684\u5F53\u524D\u7B14\u8BB0\u5E93\u53EF\u4EE5\u8FD0\u884C\u5B9A\u65F6\u4EFB\u52A1\u548C\u90AE\u4EF6\u901A\u77E5\u3002" : "\u514D\u8D39\u7248\u3002\u6FC0\u6D3B\u540E\u53EF\u521B\u5EFA\u548C\u8FD0\u884C\u5B9A\u65F6\u4EFB\u52A1\u3001\u6279\u91CF\u5199\u56DE\u7B14\u8BB0\u53CA\u53D1\u9001\u90AE\u4EF6\u3002\u5DF2\u6709\u4EFB\u52A1\u5728\u672A\u6FC0\u6D3B\u65F6\u6682\u505C\u3002");
     let activationInput;
     if (!automationActive) {
+      licenseSetting.descEl.createDiv().createEl("a", {
+        text: "\u524D\u5F80\u7A0B\u5E8F\u5C0F\u5E97\u83B7\u53D6\u6FC0\u6D3B\u7801",
+        href: "https://shop.sanrenjz.com/obsidian/obsidian%E6%8F%92%E4%BB%B6-yuhanbo-opencode",
+        attr: { target: "_blank", rel: "noopener noreferrer" }
+      });
       licenseSetting.addText((input) => {
         activationInput = input;
         input.setPlaceholder("\u7C98\u8D34\u6FC0\u6D3B\u7801");
